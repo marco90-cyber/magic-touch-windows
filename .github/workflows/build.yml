@@ -1,0 +1,69 @@
+name: Build Windows
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.9
+
+      - name: Compila e crea la versione portatile
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle createDistributable -PmsiVersion=1.0.${{ github.run_number }} --no-daemon --stacktrace 2>&1 | tee build.log || {
+            grep -E "^e: " build.log | head -30 | while IFS= read -r l; do echo "::error::${l}"; done
+            exit 1
+          }
+
+      - name: Zip portatile
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "build/compose/binaries/main/app/MagicTouchRemove" `
+            -DestinationPath "MagicTouchRemove-Windows-v1.${{ github.run_number }}-portatile.zip"
+
+      - name: Installer MSI
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $wix = "C:\Program Files (x86)\WiX Toolset v3.14\bin"
+          if (Test-Path $wix) { $env:PATH = "$wix;$env:PATH" }
+          gradle packageMsi "-PmsiVersion=1.0.${{ github.run_number }}" --no-daemon --stacktrace
+          $msi = Get-ChildItem -Path build/compose/binaries -Recurse -Filter *.msi | Select-Object -First 1
+          if ($msi) { Copy-Item $msi.FullName "MagicTouchRemove-Windows-v1.${{ github.run_number }}.msi" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MagicTouchRemove-Windows
+          path: |
+            MagicTouchRemove-Windows-*.zip
+            MagicTouchRemove-Windows-*.msi
+
+      - name: Pubblica la release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+        run: |
+          NOTES=$(printf '%s' "$COMMIT_MSG" | head -n 1)
+          [ -z "$NOTES" ] && NOTES="Build automatica"
+          gh release create "v1.${{ github.run_number }}" MagicTouchRemove-Windows-*.zip MagicTouchRemove-Windows-*.msi \
+            --target "${{ github.sha }}" --title "Magic Touch Remove per Windows v1.${{ github.run_number }}" \
+            --notes "$NOTES" || \
+          gh release create "v1.${{ github.run_number }}" MagicTouchRemove-Windows-*.zip \
+            --target "${{ github.sha }}" --title "Magic Touch Remove per Windows v1.${{ github.run_number }}" \
+            --notes "$NOTES"

@@ -1,0 +1,38 @@
+import org.jetbrains.compose.desktop.application.dsl.TargetFormat
+
+plugins {
+    kotlin("jvm") version "1.9.24"
+    id("org.jetbrains.compose") version "1.6.11"
+}
+
+group = "com.marco.magictouchremove"
+version = (findProperty("appVersion") as String?) ?: "1.0.0"
+
+dependencies {
+    implementation(compose.desktop.currentOs)
+    implementation(compose.material3)
+    implementation(compose.materialIconsExtended)
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.8.1")
+    implementation("com.microsoft.onnxruntime:onnxruntime:1.20.0")
+}
+
+compose.desktop {
+    application {
+        mainClass = "com.marco.magictouchremove.MainKt"
+        nativeDistributions {
+            targetFormats(TargetFormat.Msi, TargetFormat.Exe)
+            packageName = "MagicTouchRemove"
+            packageVersion = (findProperty("msiVersion") as String?) ?: "1.0.0"
+            description = "Rimozione oggetti dalle foto con l'IA, in locale"
+            vendor = "marco90-cyber"
+            modules("java.net.http", "jdk.unsupported")
+            windows {
+                menuGroup = "Magic Touch Remove"
+                shortcut = true
+                dirChooser = true
+                perUserInstall = true
+                upgradeUuid = "6d1f2b0e-7a1c-4c44-9f0b-3a5d7d2b9a11"
+            }
+        }
+    }
+}
