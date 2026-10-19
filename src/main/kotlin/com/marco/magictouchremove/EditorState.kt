@@ -36,6 +36,7 @@ enum class Tool(val label: String, val key: String) {
     ERASER("Gomma", "E"),
     RESTORE("Ripristina", "R"),
     HAND("Mano", "H"),
+    ZOOM("Zoom", "Z"),
 }
 
 /** Uno stato della cronologia (come il pannello «Storia» di Photoshop). */
@@ -59,6 +60,8 @@ class EditorState(private val scope: CoroutineScope) {
     var expand by mutableFloatStateOf(3f)
     var auto by mutableStateOf(false)
     var comparing by mutableStateOf(false)
+    var zoomOut by mutableStateOf(false)          // strumento Zoom: true = riduci
+    var showLog by mutableStateOf(false)          // finestra «Registro eventi»
 
     // ---- stato di lavoro ----
     var busy by mutableStateOf(false); private set
@@ -101,7 +104,9 @@ class EditorState(private val scope: CoroutineScope) {
                 busy = false
                 if (img == null) {
                     message = "Impossibile aprire «${file.name}»"
+                    AppLog.e("Apertura non riuscita: ${file.path}")
                 } else {
+                    AppLog.i("Aperta «${file.name}» (${img.width}×${img.height} px)")
                     image = img
                     original = img
                     mask = ByteArray(img.width * img.height)
@@ -131,6 +136,7 @@ class EditorState(private val scope: CoroutineScope) {
             withContext(Dispatchers.Main) {
                 busy = false
                 message = err?.let { "Salvataggio non riuscito: $it" } ?: "Salvato: ${file.name}"
+                if (err != null) AppLog.e("Salvataggio non riuscito (${file.path}): $err") else AppLog.i("Salvata la foto in ${file.path}")
             }
         }
     }
@@ -205,6 +211,16 @@ class EditorState(private val scope: CoroutineScope) {
     }
 
     fun pan(d: Offset) { panX += d.x; panY += d.y }
+
+    /** Zoom su un riquadro disegnato sullo schermo (come lo strumento Zoom di Photoshop). */
+    fun zoomToRect(r: Rect) {
+        if (image == null || r.width < 4f || r.height < 4f || viewW <= 0f || viewH <= 0f) return
+        val c = toImage(r.center)
+        val nz = min(viewW / r.width, viewH / r.height).times(zoom).coerceIn(0.02f, 32f)
+        zoom = nz
+        panX = viewW / 2f - c.x * nz
+        panY = viewH / 2f - c.y * nz
+    }
 
     fun toImage(screen: Offset) = Offset((screen.x - panX) / zoom, (screen.y - panY) / zoom)
 
@@ -345,7 +361,11 @@ class EditorState(private val scope: CoroutineScope) {
         val img = image ?: return
         busy = true; busyText = "Selezione automatica…"
         scope.launch(Dispatchers.Default) {
+            val t0 = System.currentTimeMillis()
             val r = runCatching { Engines.segmenter().select(img, point, box) }
+            r.exceptionOrNull()?.let { AppLog.e("Selezione automatica non riuscita", it) }
+            if (r.isSuccess) AppLog.i("Selezione automatica (${if (box != null) "riquadro" else "clic"}): " +
+                (if (r.getOrNull() != null) "oggetto trovato" else "nessun oggetto") + " in ${System.currentTimeMillis() - t0} ms")
             val sel: BooleanArray? = r.getOrNull()
             val err: String? = r.exceptionOrNull()?.let { it.message ?: it.toString() }
             withContext(Dispatchers.Main) {
@@ -378,7 +398,10 @@ class EditorState(private val scope: CoroutineScope) {
         val ex = expand.toInt()
         val feather = ((1f - hardness) * 8f).toInt()
         scope.launch(Dispatchers.Default) {
+            val t0 = System.currentTimeMillis()
             val r = runCatching { Engines.inpainter().inpaint(img, m, ex, feather) }
+            r.exceptionOrNull()?.let { AppLog.e("Rimozione non riuscita", it) }
+            if (r.isSuccess) AppLog.i("Rimozione con l'IA completata in ${System.currentTimeMillis() - t0} ms (espansione $ex px, sfumatura $feather)")
             val res: BufferedImage? = r.getOrNull()
             val err: String? = r.exceptionOrNull()?.let { it.message ?: it.toString() }
             withContext(Dispatchers.Main) {

@@ -19,7 +19,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.window.Dialog
+import java.awt.Toolkit
+import java.awt.datatransfer.StringSelection
+import java.text.SimpleDateFormat
+import java.util.Date
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -30,6 +37,7 @@ import androidx.compose.material.icons.filled.Backspace
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.filled.PanTool
+import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
@@ -89,6 +97,26 @@ fun pickImageToSave(suggested: String): File? {
     return File(d.directory, name)
 }
 
+fun EditorState.imageInfo(): String? = image?.let { "$fileName (${it.width}×${it.height} px)" }
+
+/** Salva il registro eventi in un file di testo scelto dall'utente. */
+fun EditorState.exportLogDialog() {
+    val stamp = SimpleDateFormat("yyyyMMdd-HHmmss").format(Date())
+    val d = FileDialog(null as Frame?, "Esporta registro eventi", FileDialog.SAVE)
+    d.file = "magic-touch-remove-log-$stamp.txt"
+    d.isVisible = true
+    val name = d.file ?: return
+    var f = File(d.directory, name)
+    if (f.extension.isEmpty()) f = File(f.path + ".txt")
+    try {
+        AppLog.export(f, imageInfo())
+        message = "Registro esportato: ${f.name}"
+    } catch (e: Exception) {
+        message = "Esportazione non riuscita: ${e.message}"
+        AppLog.e("Esportazione del registro non riuscita", e)
+    }
+}
+
 fun EditorState.openDialog() { pickImageToOpen()?.let { open(it) } }
 
 fun EditorState.saveDialog() {
@@ -131,6 +159,7 @@ fun App(st: EditorState) {
     }
 
     if (showAbout) AboutDialog { showAbout = false }
+    if (st.showLog) LogDialog(st)
 }
 
 // =========================================================================
@@ -164,6 +193,7 @@ private fun MenuBar(st: EditorState, onAbout: () -> Unit) {
             Item("Riduci", "Ctrl+-", st.image != null) { close(); st.zoomAt(0.8f) }
         }
         Menu("Aiuto") { close ->
+            Item("Registro eventi…", "Ctrl+L") { close(); st.showLog = true }
             Item("Informazioni e licenze", "") { close(); onAbout() }
         }
     }
@@ -236,6 +266,13 @@ private fun OptionsBar(st: EditorState) {
             )
             Tool.LASSO -> Text("Disegna un contorno attorno all'oggetto", color = PsDim, fontSize = 12.sp)
             Tool.HAND -> Text("Trascina per spostare · rotellina per lo zoom", color = PsDim, fontSize = 12.sp)
+            Tool.ZOOM -> {
+                PsButton("Ingrandisci", primary = !st.zoomOut) { st.zoomOut = false }
+                PsButton("Riduci", primary = st.zoomOut) { st.zoomOut = true }
+                PsButton("Adatta schermo", enabled = st.image != null) { st.fit() }
+                PsButton("100%", enabled = st.image != null) { st.actualSize() }
+                Text("Clic per ingrandire · Alt+clic per ridurre · trascina per zoom su un riquadro", color = PsDim, fontSize = 12.sp)
+            }
         }
 
         Spacer(Modifier.weight(1f))
@@ -300,6 +337,7 @@ private fun iconOf(t: Tool): ImageVector = when (t) {
     Tool.ERASER -> Icons.Filled.Backspace
     Tool.RESTORE -> Icons.Filled.Restore
     Tool.HAND -> Icons.Filled.PanTool
+    Tool.ZOOM -> Icons.Filled.ZoomIn
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -560,6 +598,10 @@ private fun StatusBar(st: EditorState) {
         if (msg != null) Text(msg, color = PsText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         else if (st.busy) Text(st.busyText, color = PsAccent, fontSize = 11.sp)
         else Text(modelsSummary(), color = PsDim, fontSize = 11.sp)
+        Text(
+            "Registro", color = PsDim, fontSize = 11.sp,
+            modifier = Modifier.clickable { st.showLog = true }
+        )
     }
 }
 
@@ -599,4 +641,69 @@ private fun AboutDialog(onClose: () -> Unit) {
         },
         confirmButton = { TextButton(onClick = onClose) { Text("Chiudi", color = PsAccent) } }
     )
+}
+
+// =========================================================================
+// Registro eventi
+// =========================================================================
+
+@Composable
+private fun LogDialog(st: EditorState) {
+    val rev = AppLog.revision   // legge lo stato osservabile, così la lista si aggiorna da sola
+    val entries = remember(rev) { AppLog.snapshot() }
+    val listState = rememberLazyListState()
+    LaunchedEffect(entries.size) {
+        if (entries.isNotEmpty()) listState.scrollToItem(entries.size - 1)
+    }
+    Dialog(onDismissRequest = { st.showLog = false }) {
+        Column(
+            Modifier.size(width = 840.dp, height = 540.dp)
+                .clip(RoundedCornerShape(6.dp)).background(PsPanel)
+                .border(1.dp, PsBorder, RoundedCornerShape(6.dp))
+        ) {
+            Row(
+                Modifier.fillMaxWidth().background(PsPanelHeader).padding(horizontal = 12.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("Registro eventi", color = PsText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                Text("${entries.size} righe", color = PsDim, fontSize = 12.sp)
+            }
+            SelectionContainer(Modifier.weight(1f).fillMaxWidth().background(PsCanvas)) {
+                LazyColumn(state = listState, modifier = Modifier.fillMaxSize().padding(8.dp)) {
+                    items(entries) { e ->
+                        Text(
+                            e.line(),
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 11.sp,
+                            color = when (e.level) {
+                                "ERRORE" -> PsError
+                                "AVVISO" -> Color(0xFFE0B040)
+                                else -> PsText
+                            },
+                            modifier = Modifier.padding(vertical = 1.dp)
+                        )
+                    }
+                }
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                PsButton("Esporta in .txt…", primary = true) { st.exportLogDialog() }
+                PsButton("Copia tutto") {
+                    try {
+                        Toolkit.getDefaultToolkit().systemClipboard
+                            .setContents(StringSelection(AppLog.asText(st.imageInfo())), null)
+                        st.message = "Registro copiato negli appunti"
+                    } catch (e: Exception) {
+                        st.message = "Impossibile copiare: ${e.message}"
+                    }
+                }
+                PsButton("Cancella") { AppLog.clear(); AppLog.i("Registro cancellato") }
+                Spacer(Modifier.weight(1f))
+                PsButton("Chiudi") { st.showLog = false }
+            }
+        }
+    }
 }

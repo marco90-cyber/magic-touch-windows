@@ -133,6 +133,7 @@ object ModelManager {
         withContext(Dispatchers.IO) {
             errors.remove(opt.id)
             progress[opt.id] = 0f
+            AppLog.i("Download del modello «${opt.title}» (${formatSize(opt.totalSize)})")
             try {
                 modelsDir.mkdirs()
                 val total = opt.totalSize.toDouble()
@@ -172,10 +173,12 @@ object ModelManager {
                     if (!part.renameTo(target)) error("Impossibile salvare ${mf.name}")
                 }
                 revision++
+                AppLog.i("Modello «${opt.title}» scaricato e verificato")
                 if (opt.kind == Kind.INPAINT && activeOption(Kind.INPAINT)?.id != activeInpaint) setActive(opt)
                 if (opt.kind == Kind.SELECT && activeOption(Kind.SELECT)?.id != activeSelect) setActive(opt)
             } catch (e: Exception) {
                 errors[opt.id] = e.message ?: "Download non riuscito"
+                AppLog.e("Download di «${opt.title}» non riuscito", e)
             } finally {
                 progress.remove(opt.id)
             }
@@ -185,6 +188,7 @@ object ModelManager {
     fun delete(opt: ModelOption) {
         opt.files.forEach { file(it).delete() }
         revision++
+        AppLog.i("Modello «${opt.title}» eliminato")
     }
 }
 
@@ -202,6 +206,7 @@ object Engines {
         if (inpainter == null || inpainterId != opt.id) {
             inpainter?.close()
             val path = ModelManager.file(opt.files[0]).absolutePath
+            AppLog.i("Caricamento del modello di rimozione «${opt.title}»")
             inpainter = if (opt.id == "migan") MiganInpainter(path) else LamaInpainter(path)
             inpainterId = opt.id
         }
@@ -216,6 +221,7 @@ object Engines {
             segmenter?.close()
             val e = ModelManager.file(opt.files[0]).absolutePath
             val d = ModelManager.file(opt.files[1]).absolutePath
+            AppLog.i("Caricamento del modello di selezione «${opt.title}»")
             segmenter = if (opt.id == "sam2") Sam2Segmenter(e, d) else MobileSamSegmenter(e, d)
             segmenterId = opt.id
         }

@@ -9,7 +9,8 @@ L'interfaccia segue il layout di Photoshop (tema scuro): menu in alto, barra del
 - **Pennello**, **Lasso**, **Gomma** e **Ripristina**, con dimensione e durezza regolabili.
 - **Cancella** con LaMa (preciso) o MI-GAN (veloce); modalità **AUTO** che parte da sola.
 - **Storia** con tutti i passaggi, annulla/ripeti, **Confronta** con l'originale (tieni premuto).
-- Zoom con la rotellina, spostamento con lo strumento Mano o il tasto centrale/destro del mouse.
+- Zoom con la rotellina o con lo strumento **Zoom** (clic per ingrandire, Alt+clic per ridurre, trascina per zoomare su un riquadro); spostamento con lo strumento Mano o il tasto centrale/destro del mouse.
+- **Registro eventi** (Aiuto → Registro eventi, Ctrl+L): tutto quello che fa l'app, con errori e tempi; si esporta in un file `.txt` da allegare alle segnalazioni.
 - Salvataggio a piena risoluzione in PNG o JPEG. L'originale non viene mai toccato.
 
 ## Scorciatoie
@@ -21,6 +22,7 @@ L'interfaccia segue il layout di Photoshop (tema scuro): menu in alto, barra del
 | `E` | Gomma | `Ctrl+D` | Deseleziona |
 | `R` | Ripristina | `Ctrl+0` / `Ctrl+1` | Adatta / 100% |
 | `H` | Mano | `[` `]` | Dimensione pennello |
+| `Z` | Zoom (Alt+clic riduce) | `Ctrl+L` | Registro eventi |
 | `Invio` | Cancella con l'IA | | |
 
 ## Installazione

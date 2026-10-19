@@ -24,7 +24,17 @@ import androidx.compose.ui.window.rememberWindowState
 
 fun main() = application {
     val scope = rememberCoroutineScope()
-    val st = remember { EditorState(scope) }
+    val st = remember {
+        AppLog.trimFileOnStart()
+        val prev = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { t, e ->
+            AppLog.e("Errore non gestito nel thread «${t.name}»", e)
+            prev?.uncaughtException(t, e)
+        }
+        AppLog.i("Avvio di Magic Touch Remove $APP_VERSION · ${System.getProperty("os.name")} ${System.getProperty("os.version")} · Java ${System.getProperty("java.version")}")
+        AppLog.i("Modelli installati: " + (ALL_OPTIONS.filter { ModelManager.isInstalled(it) }.joinToString(", ") { it.title }.ifEmpty { "nessuno" }))
+        EditorState(scope)
+    }
     val winState = rememberWindowState(size = DpSize(1360.dp, 860.dp), position = WindowPosition(Alignment.Center))
 
     val title = if (st.image != null) "${st.fileName} — Magic Touch Remove" else "Magic Touch Remove"
@@ -44,6 +54,7 @@ fun main() = application {
                 ctrl && e.key == Key.Y -> { st.redo(); true }
                 ctrl && e.key == Key.Z -> { st.undo(); true }
                 ctrl && e.key == Key.D -> { st.deselect(); true }
+                ctrl && e.key == Key.L -> { st.showLog = !st.showLog; true }
                 ctrl && e.key == Key.Zero -> { st.fit(); true }
                 ctrl && e.key == Key.One -> { st.actualSize(); true }
                 ctrl && (e.key == Key.Equals || e.key == Key.Plus) -> { st.zoomAt(1.25f); true }
@@ -56,6 +67,7 @@ fun main() = application {
                 e.key == Key.E -> { st.tool = Tool.ERASER; true }
                 e.key == Key.R -> { st.tool = Tool.RESTORE; true }
                 e.key == Key.H -> { st.tool = Tool.HAND; true }
+                e.key == Key.Z -> { st.tool = Tool.ZOOM; true }
                 e.key == Key.LeftBracket -> { st.brushSize = (st.brushSize - 6f).coerceAtLeast(4f); true }
                 e.key == Key.RightBracket -> { st.brushSize = (st.brushSize + 6f).coerceAtMost(300f); true }
                 else -> false

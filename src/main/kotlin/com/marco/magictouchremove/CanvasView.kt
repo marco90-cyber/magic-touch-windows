@@ -26,6 +26,7 @@ import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.onPointerEvent
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.isAltPressed
 import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.isTertiaryPressed
 import androidx.compose.ui.input.pointer.positionChange
@@ -91,6 +92,23 @@ fun CanvasView(st: EditorState, modifier: Modifier = Modifier) {
                                 c.consume()
                             }
                             st.finishLasso()
+                        }
+                        Tool.ZOOM -> {
+                            val start = down.position
+                            var cur = start
+                            val out = st.zoomOut || currentEvent.keyboardModifiers.isAltPressed
+                            drag(down.id) { c ->
+                                cur = c.position
+                                if (!out) st.dragBox = Rect(
+                                    min(start.x, cur.x), min(start.y, cur.y),
+                                    max(start.x, cur.x), max(start.y, cur.y)
+                                )
+                                c.consume()
+                            }
+                            val box = st.dragBox
+                            st.dragBox = null
+                            if (!out && box != null && (cur - start).getDistance() > 6f) st.zoomToRect(box)
+                            else st.zoomAt(if (out) 1f / 1.6f else 1.6f, start.x, start.y)
                         }
                         Tool.SELECT -> {
                             val start = down.position
