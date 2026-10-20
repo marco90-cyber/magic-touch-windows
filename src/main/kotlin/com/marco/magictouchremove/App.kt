@@ -2,7 +2,6 @@ package com.marco.magictouchremove
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Canvas
-import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.DragData
 import androidx.compose.ui.onExternalDrag
 import androidx.compose.foundation.Image
