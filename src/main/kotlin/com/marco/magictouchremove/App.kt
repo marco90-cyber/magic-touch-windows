@@ -2,6 +2,9 @@ package com.marco.magictouchremove
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Canvas
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.DragData
+import androidx.compose.ui.onExternalDrag
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -136,7 +139,7 @@ fun EditorState.exportLogDialog() {
     }
 }
 
-fun EditorState.openDialog() { pickImageToOpen()?.let { open(it) } }
+fun EditorState.openDialog() { pickImageToOpen()?.let { requestOpen(it) } }
 
 fun EditorState.saveDialog() { if (image != null) showExport = true }
 
@@ -144,6 +147,7 @@ fun EditorState.saveDialog() { if (image != null) showExport = true }
 // Schermata principale
 // =========================================================================
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun App(st: EditorState) {
     var showAbout by remember { mutableStateOf(false) }
@@ -155,7 +159,29 @@ fun App(st: EditorState) {
         }
     }
 
-    Column(Modifier.fillMaxSize().background(PsPanel)) {
+    LaunchedEffect(st.showExport, st.busy) {
+        // salvataggio annullato: non aprire più il file in attesa
+        if (!st.showExport && !st.busy) st.pendingOpen = null
+    }
+
+    Column(
+        Modifier.fillMaxSize().background(PsPanel)
+            .onExternalDrag(
+                onDragStart = { st.dropping = true },
+                onDragExit = { st.dropping = false },
+                onDrop = { v ->
+                    st.dropping = false
+                    val d = v.dragData
+                    if (d is DragData.FilesList) {
+                        val f = d.readFiles().firstNotNullOfOrNull { u ->
+                            runCatching { File(java.net.URI(u)) }.getOrNull()
+                                ?.takeIf { it.isFile && it.extension.lowercase() in setOf("jpg", "jpeg", "png", "bmp", "gif") }
+                        }
+                        if (f != null) st.requestOpen(f) else st.message = "Trascina un file immagine (JPG, PNG, BMP, GIF)"
+                    }
+                }
+            )
+    ) {
         MenuBar(st, onAbout = { showAbout = true })
         OptionsBar(st)
         UpdateBanner(st)
@@ -176,6 +202,11 @@ fun App(st: EditorState) {
     }
 
     if (showAbout) AboutDialog { showAbout = false }
+    if (st.dropping) Box(
+        Modifier.fillMaxSize().background(Color(0x552D8CEB)).border(3.dp, PsAccent),
+        contentAlignment = Alignment.Center
+    ) { Text("Rilascia qui la foto per aprirla", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold) }
+    st.pendingOpen?.let { UnsavedDialog(st, it) }
     if (st.showLog) LogDialog(st)
     if (st.crashText != null) CrashDialog(st)
     if (st.showExport) ExportDialog(st)
@@ -757,6 +788,29 @@ private fun LogDialog(st: EditorState) {
                 PsButton("Cancella") { AppLog.clear(); AppLog.i("Registro cancellato") }
                 Spacer(Modifier.weight(1f))
                 PsButton("Chiudi") { st.showLog = false }
+            }
+        }
+    }
+}
+
+@Composable
+private fun UnsavedDialog(st: EditorState, next: File) {
+    Dialog(onDismissRequest = { st.pendingOpen = null }) {
+        Column(
+            Modifier.width(480.dp).clip(RoundedCornerShape(6.dp)).background(PsPanel)
+                .border(1.dp, PsBorder, RoundedCornerShape(6.dp)).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text("Aprire una nuova immagine?", color = PsText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Text(
+                "«${st.fileName}» ha modifiche non salvate. Prima di aprire «${next.name}» cosa vuoi fare?",
+                color = PsDim, fontSize = 12.sp
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                PsButton("Salva…", primary = true) { st.showExport = true }
+                PsButton("Chiudi senza salvare") { st.pendingOpen = null; st.open(next) }
+                Spacer(Modifier.weight(1f))
+                PsButton("Annulla") { st.pendingOpen = null }
             }
         }
     }

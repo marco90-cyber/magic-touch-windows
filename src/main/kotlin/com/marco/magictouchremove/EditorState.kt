@@ -116,6 +116,18 @@ class EditorState(private val scope: CoroutineScope) {
     // apertura / salvataggio
     // =====================================================================
 
+    private var savedImage: BufferedImage? = null
+    var pendingOpen by mutableStateOf<File?>(null)   // file in attesa della risposta «salvare?»
+    var dropping by mutableStateOf(false)            // trascinamento file sopra la finestra
+
+    val dirty: Boolean get() = image != null && image !== savedImage
+
+    /** Apre un file; se c'è un lavoro non salvato chiede prima cosa fare. */
+    fun requestOpen(file: File) {
+        if (busy) return
+        if (dirty) pendingOpen = file else open(file)
+    }
+
     fun open(file: File) {
         if (busy) return
         busy = true; busyText = "Apertura di ${file.name}…"
@@ -129,6 +141,7 @@ class EditorState(private val scope: CoroutineScope) {
                 } else {
                     AppLog.i("Aperta «${file.name}» (${img.width}×${img.height} px)")
                     image = img
+                    savedImage = img
                     original = img
                     mask = ByteArray(img.width * img.height)
                     fileName = file.name
@@ -168,6 +181,8 @@ class EditorState(private val scope: CoroutineScope) {
                 } else {
                     val (w, h) = scaledSize(img, o.scale)
                     message = "Salvato: ${file.name}"
+                    if (image === img) savedImage = img
+                    pendingOpen?.let { pendingOpen = null; open(it) }
                     AppLog.i("Salvata la foto in ${file.path} · ${o.format.label}" +
                         (if (o.format.lossy) " qualità ${o.quality}%" else "") +
                         " · ${scaleLabel(o.scale)} (${w}×${h} px) · ${formatBytes(r.getOrNull() ?: 0L)} · ${System.currentTimeMillis() - t0} ms")
