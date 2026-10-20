@@ -9,7 +9,9 @@ L'interfaccia segue il layout di Photoshop (tema scuro): menu in alto, barra del
 - **Pennello**, **Lasso**, **Gomma** e **Ripristina**, con dimensione e durezza regolabili.
 - **Cancella** con LaMa (preciso) o MI-GAN (veloce); modalità **AUTO** che parte da sola.
 - **Storia** con tutti i passaggi, annulla/ripeti, **Confronta** con l'originale (tieni premuto).
-- Zoom con la rotellina o con lo strumento **Zoom** (clic per ingrandire, Alt+clic per ridurre, trascina per zoomare su un riquadro); spostamento con lo strumento Mano o il tasto centrale/destro del mouse.
+- Zoom con la rotellina o con lo strumento **Zoom** (clic per ingrandire, Alt+clic per ridurre, trascina per zoomare su un riquadro); spostamento con lo strumento Mano o il tasto centrale del mouse.
+- **Menu del tasto destro** nella tela, diverso per ogni strumento come in Photoshop: pennello, gomma e ripristina mostrano dimensione e durezza; selezione e lasso le azioni sulla selezione; mano e zoom le opzioni di zoom.
+- **Informazioni sistema** (Aiuto → Informazioni sistema): sistema operativo, processore, RAM, schermi, schede video con memoria, driver, DirectX e stato dell'accelerazione 3D (Direct3D). Si esporta in `.txt`.
 - **Registro eventi** (Aiuto → Registro eventi, Ctrl+L): tutto quello che fa l'app, con errori e tempi; si esporta in un file `.txt` da allegare alle segnalazioni.
 - **Salva con nome**: scegli formato (PNG, JPEG, TIFF, BMP), risoluzione (originale, 75%, 50%, 45%, 25%) e, per il JPEG, la qualità da 80 a 100%, con il peso stimato del file. L'originale non viene mai toccato.
 - **Aggiornamenti** direttamente dall'app (menu Aggiornamenti): controllo all'avvio, avviso con notifica di Windows e installazione con un clic.

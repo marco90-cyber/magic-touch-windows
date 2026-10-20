@@ -1,6 +1,9 @@
 package com.marco.magictouchremove
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.foundation.TooltipArea
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -151,6 +154,7 @@ fun App(st: EditorState) {
                 DocumentTab(st)
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     CanvasView(st, Modifier.fillMaxSize())
+                    ContextMenu(st)
                     if (st.image == null) EmptyState(st)
                     if (st.busy) BusyOverlay(st.busyText)
                 }
@@ -163,6 +167,7 @@ fun App(st: EditorState) {
     if (showAbout) AboutDialog { showAbout = false }
     if (st.showLog) LogDialog(st)
     if (st.showExport) ExportDialog(st)
+    if (st.showSysInfo) SysInfoDialog(st)
     if (Updater.dialogOpen) UpdateDialog(st)
 }
 
@@ -177,9 +182,10 @@ private fun MenuBar(st: EditorState, onAbout: () -> Unit) {
         Modifier.fillMaxWidth().height(28.dp).background(PsPanelHeader),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(Modifier.padding(horizontal = 10.dp)) {
-            Text("Ps", color = PsAccent, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-        }
+        Image(
+            painter = AppIcon, contentDescription = "Magic Touch Remove",
+            modifier = Modifier.padding(horizontal = 8.dp).size(18.dp)
+        )
         Menu("File") { close ->
             Item("Apri…", "Ctrl+O") { close(); st.openDialog() }
             Item("Salva con nome…", "Ctrl+S", st.image != null) { close(); st.saveDialog() }
@@ -207,6 +213,7 @@ private fun MenuBar(st: EditorState, onAbout: () -> Unit) {
         }
         Menu("Aiuto") { close ->
             Item("Registro eventi…", "Ctrl+L") { close(); st.showLog = true }
+            Item("Informazioni sistema…", "") { close(); st.showSysInfo = true }
             Item("Informazioni e licenze", "") { close(); onAbout() }
         }
     }
@@ -427,6 +434,8 @@ private fun EmptyState(st: EditorState) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
+        Image(painter = AppIcon, contentDescription = null, modifier = Modifier.size(96.dp))
+        Spacer(Modifier.height(12.dp))
         Text("Magic Touch Remove", color = PsText, fontSize = 22.sp, fontWeight = FontWeight.Light)
         Spacer(Modifier.height(6.dp))
         Text("Rimuovi oggetti, persone e ombre dalle foto con l'IA, tutto sul tuo PC.", color = PsDim, fontSize = 13.sp)
@@ -908,6 +917,153 @@ private fun UpdateDialog(st: EditorState) {
                 } else if (status != UpdateStatus.DOWNLOADING) {
                     PsButton("Chiudi", primary = status != UpdateStatus.CHECKING) { Updater.dialogOpen = false }
                 }
+            }
+        }
+    }
+}
+
+// =========================================================================
+// Menu del tasto destro nella tela (cambia con lo strumento, come in Photoshop)
+// =========================================================================
+
+@Composable
+private fun CtxItem(label: String, shortcut: String = "", enabled: Boolean = true, onClick: () -> Unit) {
+    DropdownMenuItem(
+        enabled = enabled,
+        onClick = onClick,
+        text = {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(label, fontSize = 12.sp, color = if (enabled) PsText else PsDim)
+                Text(shortcut, fontSize = 12.sp, color = PsDim)
+            }
+        },
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+        modifier = Modifier.height(28.dp)
+    )
+}
+
+@Composable
+private fun CtxSeparator() {
+    Box(Modifier.padding(vertical = 3.dp).fillMaxWidth().height(1.dp).background(PsBorder))
+}
+
+@Composable
+private fun ContextMenu(st: EditorState) {
+    val pos = st.ctxPos ?: return
+    Box(Modifier.offset { IntOffset(pos.x.roundToInt(), pos.y.roundToInt()) }) {
+        DropdownMenu(
+            expanded = true,
+            onDismissRequest = { st.ctxPos = null },
+            modifier = Modifier.background(PsPanel).widthIn(min = 250.dp)
+        ) {
+            val close = { st.ctxPos = null }
+            Text(st.tool.label.uppercase(), color = PsDim, fontSize = 10.sp, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(start = 12.dp, top = 4.dp, bottom = 4.dp))
+            when (st.tool) {
+                Tool.BRUSH, Tool.ERASER, Tool.RESTORE -> {
+                    Column(Modifier.padding(horizontal = 12.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        PsSlider("Dimensione", st.brushSize, 4f, 300f, "${st.brushSize.toInt()} px", { st.brushSize = it })
+                        PsSlider("Durezza", st.hardness, 0f, 1f, "${(st.hardness * 100).toInt()}%", { st.hardness = it })
+                    }
+                    CtxSeparator()
+                    CtxItem("Cancella con IA", "Invio", st.hasMask && !st.busy) { close(); st.remove() }
+                    CtxItem("Deseleziona", "Ctrl+D", st.hasMask) { close(); st.deselect() }
+                    CtxItem("Inverti selezione", "", true) { close(); st.invertSelection() }
+                }
+                Tool.SELECT, Tool.LASSO -> {
+                    CtxItem("Cancella con IA", "Invio", st.hasMask && !st.busy) { close(); st.remove() }
+                    CtxItem("Deseleziona", "Ctrl+D", st.hasMask) { close(); st.deselect() }
+                    CtxItem("Inverti selezione", "", true) { close(); st.invertSelection() }
+                    CtxSeparator()
+                    Column(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
+                        PsSlider("Espansione", st.expand, 0f, 15f, "${st.expand.toInt()} px", { st.expand = it })
+                    }
+                }
+                Tool.HAND, Tool.ZOOM -> {
+                    CtxItem("Ingrandisci", "Ctrl++") { close(); st.zoomAt(1.25f) }
+                    CtxItem("Riduci", "Ctrl+-") { close(); st.zoomAt(0.8f) }
+                    CtxItem("Adatta alla finestra", "Ctrl+0") { close(); st.fit() }
+                    CtxItem("100%", "Ctrl+1") { close(); st.actualSize() }
+                    CtxItem("200%", "") { close(); st.zoomTo(2f) }
+                    CtxItem("50%", "") { close(); st.zoomTo(0.5f) }
+                }
+            }
+            CtxSeparator()
+            CtxItem("Annulla", "Ctrl+Z", st.canUndo) { close(); st.undo() }
+            CtxItem("Ripeti", "Ctrl+Maiusc+Z", st.canRedo) { close(); st.redo() }
+        }
+    }
+}
+
+// =========================================================================
+// Informazioni sistema
+// =========================================================================
+
+@Composable
+private fun SysInfoDialog(st: EditorState) {
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(Unit) { SysInfo.refresh() }
+    Dialog(onDismissRequest = { st.showSysInfo = false }) {
+        Column(
+            Modifier.size(width = 860.dp, height = 580.dp).clip(RoundedCornerShape(6.dp)).background(PsPanel)
+                .border(1.dp, PsBorder, RoundedCornerShape(6.dp))
+        ) {
+            Row(
+                Modifier.fillMaxWidth().background(PsPanelHeader).padding(horizontal = 14.dp, vertical = 9.dp),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("Informazioni sistema", color = PsText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                if (SysInfo.loading) Text("Rilevamento schede video in corso…", color = PsAccent, fontSize = 12.sp)
+            }
+            if (SysInfo.loading) LinearProgressIndicator(Modifier.fillMaxWidth(), color = PsAccent, trackColor = Color(0xFF1F1F1F))
+            SelectionContainer(Modifier.weight(1f).fillMaxWidth().background(PsCanvas)) {
+                Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(14.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    for (sec in SysInfo.sections) {
+                        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Text(sec.title, color = PsAccent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            for (r in sec.rows) {
+                                Row {
+                                    Text(r.label, color = PsDim, fontSize = 12.sp, modifier = Modifier.width(260.dp))
+                                    Text(r.value, color = PsText, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                PsButton("Esporta in .txt…", primary = true, enabled = SysInfo.sections.isNotEmpty()) {
+                    val stamp = SimpleDateFormat("yyyyMMdd-HHmmss").format(Date())
+                    val d = FileDialog(null as Frame?, "Esporta informazioni sistema", FileDialog.SAVE)
+                    d.file = "magic-touch-remove-sistema-$stamp.txt"
+                    d.isVisible = true
+                    val name = d.file
+                    if (name != null) {
+                        var f = File(d.directory, name)
+                        if (f.extension.isEmpty()) f = File(f.path + ".txt")
+                        try {
+                            f.writeText(SysInfo.asText(), Charsets.UTF_8)
+                            st.message = "Informazioni esportate: ${f.name}"
+                        } catch (e: Exception) {
+                            st.message = "Esportazione non riuscita: ${e.message}"
+                        }
+                    }
+                }
+                PsButton("Copia tutto", enabled = SysInfo.sections.isNotEmpty()) {
+                    try {
+                        Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(SysInfo.asText()), null)
+                        st.message = "Informazioni copiate negli appunti"
+                    } catch (e: Exception) {
+                        st.message = "Impossibile copiare: ${e.message}"
+                    }
+                }
+                PsButton("Aggiorna", enabled = !SysInfo.loading) { scope.launch { SysInfo.refresh(force = true) } }
+                Spacer(Modifier.weight(1f))
+                PsButton("Chiudi") { st.showSysInfo = false }
             }
         }
     }

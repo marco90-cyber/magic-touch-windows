@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.drag
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -67,7 +68,14 @@ fun CanvasView(st: EditorState, modifier: Modifier = Modifier) {
                     val down = awaitFirstDown(requireUnconsumed = false)
                     if (st.image == null || st.busy) return@awaitEachGesture
                     val buttons = currentEvent.buttons
-                    val t = if (buttons.isTertiaryPressed || buttons.isSecondaryPressed) Tool.HAND else st.tool
+                    if (buttons.isSecondaryPressed) {
+                        // tasto destro: menu dello strumento attivo (come in Photoshop)
+                        st.ctxPos = down.position
+                        down.consume()
+                        waitForUpOrCancellation()
+                        return@awaitEachGesture
+                    }
+                    val t = if (buttons.isTertiaryPressed) Tool.HAND else st.tool
                     when (t) {
                         Tool.HAND -> {
                             drag(down.id) { c ->

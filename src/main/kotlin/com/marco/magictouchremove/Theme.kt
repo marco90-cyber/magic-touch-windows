@@ -23,7 +23,10 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.res.loadImageBitmap
+import androidx.compose.ui.res.useResource
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -77,3 +80,6 @@ fun PsSlider(
         Text(valueText, color = PsText, fontSize = 12.sp, modifier = Modifier.width(38.dp))
     }
 }
+
+/** Icona dell'app (la stessa dell'app Android), caricata da resources/icon.png. */
+val AppIcon: BitmapPainter by lazy { BitmapPainter(useResource("icon.png", ::loadImageBitmap)) }

@@ -63,6 +63,8 @@ class EditorState(private val scope: CoroutineScope) {
     var zoomOut by mutableStateOf(false)          // strumento Zoom: true = riduci
     var showLog by mutableStateOf(false)          // finestra «Registro eventi»
     var showExport by mutableStateOf(false)       // finestra «Salva con nome»
+    var showSysInfo by mutableStateOf(false)      // finestra «Informazioni sistema»
+    var ctxPos by mutableStateOf<Offset?>(null)   // menu del tasto destro (coordinate schermo nella tela)
     var exitApp: () -> Unit = {}
 
     // ---- stato di lavoro ----
@@ -181,6 +183,14 @@ class EditorState(private val scope: CoroutineScope) {
 
     fun undo() { if (canUndo) goTo(pos - 1) }
     fun redo() { if (canRedo) goTo(pos + 1) }
+
+    fun invertSelection() {
+        if (image == null || busy) return
+        for (i in mask.indices) mask[i] = (255 - (mask[i].toInt() and 255)).toByte()
+        hasMask = mask.any { it.toInt() != 0 }
+        version++
+        commit("Inverti selezione")
+    }
 
     fun deselect() {
         if (image == null || !hasMask) return

@@ -56,9 +56,8 @@ fun main() = application {
     val trayState = rememberTrayState()
     val upd = Updater.info
     if (Updater.status == UpdateStatus.AVAILABLE && upd != null) {
-        val icon = remember { BitmapPainter(trayIconImage().toComposeImageBitmap()) }
         Tray(
-            icon = icon,
+            icon = AppIcon,
             state = trayState,
             tooltip = "Magic Touch Remove: aggiornamento ${upd.name} disponibile",
             onAction = { Updater.dialogOpen = true }
@@ -82,6 +81,7 @@ fun main() = application {
     Window(
         onCloseRequest = ::exitApplication,
         title = title,
+        icon = AppIcon,
         state = winState,
         onKeyEvent = { e ->
             if (e.type != KeyEventType.KeyDown) return@Window false
@@ -128,18 +128,4 @@ fun main() = application {
             }
         }
     }
-}
-
-/** Icona per l'area di notifica di Windows. */
-private fun trayIconImage(): BufferedImage {
-    val img = BufferedImage(32, 32, BufferedImage.TYPE_INT_ARGB)
-    val g = img.createGraphics()
-    g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
-    g.color = java.awt.Color(0x2D, 0x8C, 0xEB)
-    g.fillRoundRect(1, 1, 30, 30, 8, 8)
-    g.color = java.awt.Color.WHITE
-    g.font = java.awt.Font("SansSerif", java.awt.Font.BOLD, 20)
-    g.drawString("M", 7, 24)
-    g.dispose()
-    return img
 }

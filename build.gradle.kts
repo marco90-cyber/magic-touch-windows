@@ -32,8 +32,9 @@ compose.desktop {
             packageVersion = (findProperty("msiVersion") as String?) ?: "1.0.0"
             description = "Rimozione oggetti dalle foto con l'IA, in locale"
             vendor = "marco90-cyber"
-            modules("java.net.http", "jdk.unsupported")
+            modules("java.net.http", "jdk.unsupported", "java.management", "jdk.management", "java.xml")
             windows {
+                iconFile.set(project.file("icon.ico"))
                 menuGroup = "Magic Touch Remove"
                 shortcut = true
                 dirChooser = true
