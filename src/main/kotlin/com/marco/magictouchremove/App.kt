@@ -208,6 +208,7 @@ fun App(st: EditorState) {
     st.pendingOpen?.let { UnsavedDialog(st, it) }
     if (st.showLog) LogDialog(st)
     if (st.crashText != null) CrashDialog(st)
+    if (st.showGenerate) GenerateDialog(st)
     if (st.showExport) ExportDialog(st)
     if (st.showSysInfo) SysInfoDialog(st)
     if (Updater.dialogOpen) UpdateDialog(st)
@@ -238,6 +239,12 @@ private fun MenuBar(st: EditorState, onAbout: () -> Unit) {
             Item("Ripeti", "Ctrl+Maiusc+Z", st.canRedo) { close(); st.redo() }
             Item("Deseleziona", "Ctrl+D", st.hasMask) { close(); st.deselect() }
             Item("Cancella con IA", "Invio", st.hasMask && !st.busy) { close(); st.remove() }
+        }
+        Menu("IA") { close ->
+            Item("Genera con descrizione…", "", st.hasMask && !st.busy) { close(); st.showGenerate = true }
+            Item("Ricostruisci la selezione (generativa)", "", st.hasMask && !st.busy) { close(); st.generate("", 20, 7.5f) }
+            Item("Ingrandisci la foto (Real-ESRGAN)", "", st.image != null && !st.busy) { close(); st.upscale() }
+            Item("Rimuovi sfondo", "", st.image != null && !st.busy) { close(); st.removeBackground() }
         }
         Menu("Visualizza") { close ->
             Item("Adatta alla finestra", "Ctrl+0", st.image != null) { close(); st.fit() }
@@ -567,6 +574,9 @@ private fun ModelsPanel() {
     Column(Modifier.verticalScroll(rememberScrollState()).padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         ModelGroup("Rimozione oggetti", Kind.INPAINT, scope)
         ModelGroup("Selezione automatica", Kind.SELECT, scope)
+        ModelGroup("IA generativa (riempi con testo)", Kind.GENERATE, scope)
+        ModelGroup("Ingrandimento foto", Kind.UPSCALE, scope)
+        ModelGroup("Rimozione sfondo", Kind.BGREMOVE, scope)
         var gpuOn by remember { mutableStateOf(Gpu.enabled) }
         Row(
             Modifier.clip(RoundedCornerShape(3.dp)).clickable { gpuOn = !gpuOn; Gpu.enabled = gpuOn }.padding(vertical = 2.dp),
@@ -832,6 +842,52 @@ private fun UnsavedDialog(st: EditorState, next: File) {
                 PsButton("Chiudi senza salvare") { st.pendingOpen = null; st.open(next) }
                 Spacer(Modifier.weight(1f))
                 PsButton("Annulla") { st.pendingOpen = null }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GenerateDialog(st: EditorState) {
+    var prompt by remember { mutableStateOf(Prefs.get("genPrompt", "")) }
+    var steps by remember { mutableFloatStateOf(20f) }
+    var guidance by remember { mutableFloatStateOf(7.5f) }
+    val installed = ModelManager.isInstalled(OPT_SD2_INPAINT)
+    Dialog(onDismissRequest = { st.showGenerate = false }) {
+        Column(
+            Modifier.width(560.dp).clip(RoundedCornerShape(6.dp)).background(PsPanel)
+                .border(1.dp, PsBorder, RoundedCornerShape(6.dp)).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text("Genera con l'IA", color = PsText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Text(
+                "Descrivi cosa deve comparire nella zona selezionata (funziona meglio in inglese, es. \u00abgreen bush\u00bb). " +
+                    "Se lasci vuoto, l'IA ricostruisce lo sfondo togliendo l'oggetto.",
+                color = PsDim, fontSize = 12.sp
+            )
+            Box(Modifier.fillMaxWidth().background(PsCanvas).border(1.dp, PsBorder).padding(8.dp)) {
+                androidx.compose.foundation.text.BasicTextField(
+                    value = prompt, onValueChange = { prompt = it.take(300) },
+                    textStyle = androidx.compose.ui.text.TextStyle(color = PsText, fontSize = 13.sp),
+                    cursorBrush = androidx.compose.ui.graphics.SolidColor(PsText),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                if (prompt.isEmpty()) Text("Descrizione (facoltativa)", color = PsDim, fontSize = 13.sp)
+            }
+            PsSlider("Passi", steps, 10f, 40f, "${steps.toInt()}", { steps = it.roundToInt().toFloat() }, trackWidth = 260.dp)
+            PsSlider("Aderenza", guidance, 1f, 12f, "%.1f".format(guidance), { guidance = (it * 2).roundToInt() / 2f }, trackWidth = 260.dp)
+            Text(
+                if (Gpu.active) "GPU attiva." else "Sulla CPU può richiedere diversi minuti; con la GPU è molto più veloce. Più passi = più qualità e più tempo.",
+                color = PsDim, fontSize = 11.sp
+            )
+            if (!installed) Text("Prima scarica il modello «Stable Diffusion 2 Inpainting» dal pannello Modelli IA (circa 5 GB).", color = PsError, fontSize = 12.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End), modifier = Modifier.fillMaxWidth()) {
+                PsButton("Annulla") { st.showGenerate = false }
+                PsButton("Genera", primary = true, enabled = installed && st.hasMask && !st.busy) {
+                    Prefs.set("genPrompt", prompt)
+                    st.showGenerate = false
+                    st.generate(prompt, steps.toInt(), guidance)
+                }
             }
         }
     }
@@ -1228,6 +1284,7 @@ private fun ContextMenu(st: EditorState) {
         }
 
         MenuSeparator()
+        MenuRow("Genera con descrizione…", "", st.hasMask && !st.busy) { close(); st.showGenerate = true }
         MenuRow("Seleziona tutto", "Ctrl+A", !st.busy) { close(); st.selectAll() }
         MenuRow("Inverti selezione", "", !st.busy) { close(); st.invertSelection() }
         MenuSeparator()

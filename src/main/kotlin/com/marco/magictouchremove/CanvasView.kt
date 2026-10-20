@@ -156,6 +156,25 @@ fun CanvasView(st: EditorState, modifier: Modifier = Modifier) {
                     topLeft = Offset(dstOff.x + 3f, dstOff.y + 3f),
                     size = Size(dstSize.width.toFloat(), dstSize.height.toFloat())
                 )
+                if (st.transparent) {
+                    // scacchiera dietro le zone trasparenti
+                    val cell = 12f
+                    val x1 = minOf(dstOff.x + dstSize.width.toFloat(), size.width)
+                    val y1 = minOf(dstOff.y + dstSize.height.toFloat(), size.height)
+                    val xs = maxOf(dstOff.x.toFloat(), 0f)
+                    val ys = maxOf(dstOff.y.toFloat(), 0f)
+                    drawRect(Color(0xFFFFFFFF), Offset(xs, ys), Size(x1 - xs, y1 - ys))
+                    var yy = ys
+                    var row = 0
+                    while (yy < y1) {
+                        var xx = xs + (if (row % 2 == 0) cell else 0f)
+                        while (xx < x1) {
+                            drawRect(Color(0xFFCCCCCC), Offset(xx, yy), Size(minOf(cell, x1 - xx), minOf(cell, y1 - yy)))
+                            xx += cell * 2
+                        }
+                        yy += cell; row++
+                    }
+                }
                 drawImage(
                     image = bitmap,
                     srcOffset = IntOffset.Zero,

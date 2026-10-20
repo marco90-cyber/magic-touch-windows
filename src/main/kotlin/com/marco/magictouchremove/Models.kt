@@ -15,9 +15,13 @@ import java.net.http.HttpResponse
 import java.security.MessageDigest
 import java.util.Properties
 
-enum class Kind { INPAINT, SELECT }
+enum class Kind { INPAINT, SELECT, GENERATE, UPSCALE, BGREMOVE }
 
-class ModelFile(val name: String, val size: Long, val sha256: String, val url: String)
+/** [sha256]/[md5] nulli = nessun controllo di integrità; [exactSize] false = la dimensione è approssimativa. */
+class ModelFile(
+    val name: String, val size: Long, val sha256: String?, val url: String,
+    val md5: String? = null, val exactSize: Boolean = true,
+)
 
 class ModelOption(
     val id: String,
@@ -66,7 +70,64 @@ val OPT_SAM2 = ModelOption(
     )
 )
 
-val ALL_OPTIONS = listOf(OPT_LAMA, OPT_MIGAN, OPT_MOBILESAM, OPT_SAM2)
+private const val HF_SD = "https://huggingface.co/jdp8/stable-diffusion-2-inpainting-onnx-fp32/resolve/main/"
+
+val OPT_SD2_INPAINT = ModelOption(
+    "sd2inpaint", Kind.GENERATE, "Stable Diffusion 2 Inpainting",
+    "Genera nuovi contenuti nella zona selezionata a partire da una descrizione, oppure ricostruisce l'area togliendo l'oggetto. " +
+        "Molto pesante: lento sulla CPU, molto meglio con la GPU.",
+    "CreativeML OpenRAIL++-M",
+    listOf(
+        ModelFile("sd2inpaint/text_encoder/model.onnx", 1362015860L, "42fb4ddd6d9d1d541e5af8e959906c8ac9e634641fc14e29537713dbec715a87", HF_SD + "text_encoder/model.onnx"),
+        ModelFile("sd2inpaint/unet/model.onnx", 1209676L, "2ed482445f17de790d1208fb2bc34a28fa4f4a04d140499f28420bf2affd886a", HF_SD + "unet/model.onnx"),
+        ModelFile("sd2inpaint/unet/model.onnx_data", 3463700480L, "1bc3224942cf08568adc2fd8d08f5f99940f3623eb1778f2c6e989e55e0cc73f", HF_SD + "unet/model.onnx_data"),
+        ModelFile("sd2inpaint/vae_encoder/model.onnx", 136760338L, "3a538424c9921b4bd51fa87f302ca0f3f4f6ec657eb0288dc9f7626b5dc878ca", HF_SD + "vae_encoder/model.onnx"),
+        ModelFile("sd2inpaint/vae_decoder/model.onnx", 198078191L, "6049e1c044b145d6338b4a57a9c6aae2d97424f7d943ad1dd57a480fe140a731", HF_SD + "vae_decoder/model.onnx"),
+        ModelFile("sd2inpaint/tokenizer/vocab.json", 1059962L, null, HF_SD + "tokenizer/vocab.json"),
+        ModelFile("sd2inpaint/tokenizer/merges.txt", 524619L, null, HF_SD + "tokenizer/merges.txt"),
+    )
+)
+
+private const val HF_ESR = "https://huggingface.co/JoPmt/Real_Esrgan_x2_Onnx_Tflite_Tfjs/resolve/main/"
+
+val OPT_ESRGAN_GENERAL = ModelOption(
+    "esrgan_general", Kind.UPSCALE, "Real-ESRGAN General x4 (leggero)",
+    "Ingrandisce la foto di 4 volte recuperando dettagli. Veloce.",
+    "BSD-3-Clause",
+    listOf(ModelFile("esrgan_general_x4v3.onnx", 4871786L, "bf44aff5d58baa77945f3c090e790e4847d45ee84e28a391b90966e7e48a5b0a", HF_ESR + "ano_test/realesr-general-x4v3.onnx"))
+)
+
+val OPT_ESRGAN_X2 = ModelOption(
+    "esrgan_x2", Kind.UPSCALE, "Real-ESRGAN x2 (qualità)",
+    "Ingrandisce la foto di 2 volte con più qualità. Più lento.",
+    "BSD-3-Clause",
+    listOf(ModelFile("esrgan_x2.onnx", 67116767L, "4b650e0f8cc10057635e24ac411902a54307401fb6c9f265bf6e1eaf9ae7c949", HF_ESR + "model.onnx"))
+)
+
+private const val RMBG = "https://github.com/danielgatis/rembg/releases/download/v0.0.0/"
+
+val OPT_U2NETP = ModelOption(
+    "u2netp", Kind.BGREMOVE, "U²-Net leggero",
+    "Toglie lo sfondo velocemente, precisione discreta.",
+    "Apache-2.0",
+    listOf(ModelFile("u2netp.onnx", 4_700_000L, null, RMBG + "u2netp.onnx", md5 = "8e83ca70e441ab06c318d82300c84806", exactSize = false))
+)
+
+val OPT_U2NET = ModelOption(
+    "u2net", Kind.BGREMOVE, "U²-Net",
+    "Buona precisione per persone, oggetti e animali.",
+    "Apache-2.0",
+    listOf(ModelFile("u2net.onnx", 176_000_000L, null, RMBG + "u2net.onnx", md5 = "60024c5c889badc19c04ad937298a77b", exactSize = false))
+)
+
+val OPT_ISNET = ModelOption(
+    "isnet", Kind.BGREMOVE, "IS-Net (alta precisione)",
+    "Bordi più precisi (capelli, dettagli), più lento.",
+    "Apache-2.0",
+    listOf(ModelFile("isnet-general-use.onnx", 170_000_000L, null, RMBG + "isnet-general-use.onnx", md5 = "fc16ebd8b0c10d971d3513d564d01e29", exactSize = false))
+)
+
+val ALL_OPTIONS = listOf(OPT_LAMA, OPT_MIGAN, OPT_MOBILESAM, OPT_SAM2, OPT_SD2_INPAINT, OPT_ESRGAN_GENERAL, OPT_ESRGAN_X2, OPT_U2NETP, OPT_U2NET, OPT_ISNET)
 
 fun formatSize(bytes: Long): String =
     if (bytes >= 1_000_000_000L) "%.1f GB".format(bytes / 1e9) else "%d MB".format(bytes / 1_000_000L)
@@ -82,34 +143,36 @@ object ModelManager {
 
     /** Cambia a ogni installazione, così l'interfaccia si aggiorna. */
     var revision by mutableStateOf(0)
-    var activeInpaint by mutableStateOf("lama")
-    var activeSelect by mutableStateOf("mobilesam")
+    private val active = mutableStateMapOf<Kind, String>()
+
+    private fun prefKey(kind: Kind) = when (kind) {
+        Kind.INPAINT -> "inpaint"
+        Kind.SELECT -> "select"
+        else -> "model_" + kind.name.lowercase()
+    }
 
     init {
         modelsDir.mkdirs()
-        activeInpaint = Prefs.get("inpaint", "lama")
-        activeSelect = Prefs.get("select", "mobilesam")
+        for (k in Kind.values()) active[k] = Prefs.get(prefKey(k), "")
     }
 
     fun file(f: ModelFile) = File(modelsDir, f.name)
 
     fun isInstalled(opt: ModelOption): Boolean {
         if (revision < 0) return false   // legge lo stato osservabile, così l'interfaccia si aggiorna
-        return opt.files.all { val f = file(it); f.isFile && f.length() == it.size }
+        return opt.files.all { val f = file(it); f.isFile && (if (it.exactSize) f.length() == it.size else f.length() > 0) }
     }
 
-    fun isActive(opt: ModelOption) =
-        if (opt.kind == Kind.INPAINT) activeInpaint == opt.id else activeSelect == opt.id
+    fun isActive(opt: ModelOption) = active[opt.kind] == opt.id
 
     fun setActive(opt: ModelOption) {
-        if (opt.kind == Kind.INPAINT) activeInpaint = opt.id else activeSelect = opt.id
-        Prefs.set("inpaint", activeInpaint)
-        Prefs.set("select", activeSelect)
+        active[opt.kind] = opt.id
+        Prefs.set(prefKey(opt.kind), opt.id)
     }
 
     /** Il modello da usare: quello scelto se installato, altrimenti il primo installato dello stesso tipo. */
     fun activeOption(kind: Kind): ModelOption? {
-        val wanted = if (kind == Kind.INPAINT) activeInpaint else activeSelect
+        val wanted = active[kind] ?: ""
         val list = ALL_OPTIONS.filter { it.kind == kind }
         return list.firstOrNull { it.id == wanted && isInstalled(it) } ?: list.firstOrNull { isInstalled(it) }
     }
@@ -131,36 +194,57 @@ object ModelManager {
                         progress[opt.id] = (done / total).toFloat()
                         continue
                     }
+                    target.parentFile?.mkdirs()
                     val part = File(target.path + ".part")
-                    val req = HttpRequest.newBuilder(URI.create(mf.url)).GET().build()
-                    val resp = client.send(req, HttpResponse.BodyHandlers.ofInputStream())
-                    if (resp.statusCode() !in 200..299) error("Errore ${resp.statusCode()} nel download di ${mf.name}")
                     val md = MessageDigest.getInstance("SHA-256")
+                    val md5 = MessageDigest.getInstance("MD5")
+                    // ripresa: se esiste un download interrotto, riparte da dove era arrivato
+                    var have = 0L
+                    if (part.isFile && part.length() > 0) {
+                        part.inputStream().use { ins ->
+                            val b = ByteArray(1 shl 20)
+                            while (true) {
+                                val n = ins.read(b)
+                                if (n < 0) break
+                                md.update(b, 0, n); md5.update(b, 0, n); have += n
+                            }
+                        }
+                    }
+                    val rb = HttpRequest.newBuilder(URI.create(mf.url)).GET()
+                    if (have > 0) rb.header("Range", "bytes=$have-")
+                    val resp = client.send(rb.build(), HttpResponse.BodyHandlers.ofInputStream())
+                    if (resp.statusCode() == 416 && have > 0) { part.delete(); error("Download interrotto in modo anomalo: riprova") }
+                    if (resp.statusCode() !in 200..299) error("Errore ${resp.statusCode()} nel download di ${mf.name}")
+                    val resumed = have > 0 && resp.statusCode() == 206
+                    if (!resumed) { md.reset(); md5.reset(); have = 0 }
+                    done += have
                     resp.body().use { input ->
-                        part.outputStream().use { out ->
+                        java.io.FileOutputStream(part, resumed).use { out ->
                             val buf = ByteArray(256 * 1024)
                             while (true) {
                                 val n = input.read(buf)
                                 if (n < 0) break
                                 out.write(buf, 0, n)
                                 md.update(buf, 0, n)
+                                md5.update(buf, 0, n)
                                 done += n
                                 progress[opt.id] = (done / total).toFloat().coerceAtMost(1f)
                             }
                         }
                     }
                     val hex = md.digest().joinToString("") { "%02x".format(it) }
-                    if (!hex.equals(mf.sha256, ignoreCase = true)) {
+                    val hex5 = md5.digest().joinToString("") { "%02x".format(it) }
+                    if ((mf.sha256 != null && !hex.equals(mf.sha256, ignoreCase = true)) ||
+                        (mf.md5 != null && !hex5.equals(mf.md5, ignoreCase = true))) {
                         part.delete()
-                        error("File ${mf.name} non valido (controllo SHA-256 fallito)")
+                        error("File ${mf.name} non valido (controllo di integrità fallito)")
                     }
                     target.delete()
                     if (!part.renameTo(target)) error("Impossibile salvare ${mf.name}")
                 }
                 revision++
                 AppLog.i("Modello «${opt.title}» scaricato e verificato")
-                if (opt.kind == Kind.INPAINT && activeOption(Kind.INPAINT)?.id != activeInpaint) setActive(opt)
-                if (opt.kind == Kind.SELECT && activeOption(Kind.SELECT)?.id != activeSelect) setActive(opt)
+                if (activeOption(opt.kind)?.id != active[opt.kind]) setActive(opt)
             } catch (e: Exception) {
                 errors[opt.id] = e.message ?: "Download non riuscito"
                 AppLog.e("Download di «${opt.title}» non riuscito", e)
@@ -181,7 +265,7 @@ object ModelManager {
     }
 
     fun folderBytes(): Long = try {
-        modelsDir.listFiles()?.filter { it.isFile }?.sumOf { it.length() } ?: 0L
+        modelsDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
     } catch (_: Throwable) {
         0L
     }
@@ -191,9 +275,10 @@ object ModelManager {
         Engines.releaseAll()   // Windows non lascia cancellare un file che è ancora aperto
         var n = 0L
         var failed = 0
-        modelsDir.listFiles()?.forEach { f ->
-            val size = f.length()
-            if (f.isFile && f.delete()) n += size else if (f.isFile) failed++
+        modelsDir.walkBottomUp().forEach { f ->
+            if (f == modelsDir) return@forEach
+            val size = if (f.isFile) f.length() else 0L
+            if (f.delete()) n += size else if (f.isFile) failed++
         }
         revision++
         AppLog.i("Eliminati i modelli scaricati (${formatBytes(n)})" + if (failed > 0) ", $failed file non eliminati" else "")
@@ -213,6 +298,52 @@ object Engines {
     fun releaseAll() {
         inpainter?.close(); inpainter = null; inpainterId = null
         segmenter?.close(); segmenter = null; segmenterId = null
+        generator?.close(); generator = null
+        upscaler?.close(); upscaler = null; upscalerId = null
+        bgRemover?.close(); bgRemover = null; bgRemoverId = null
+    }
+
+    private var generator: SdInpainter? = null
+    private var upscaler: Upscaler? = null
+    private var upscalerId: String? = null
+    private var bgRemover: BackgroundRemover? = null
+    private var bgRemoverId: String? = null
+
+    @Synchronized
+    fun generator(): SdInpainter {
+        val opt = ModelManager.activeOption(Kind.GENERATE)
+            ?: error("Modello generativo non scaricato: scaricalo dal pannello «Modelli IA»")
+        if (generator == null) {
+            AppLog.i("Caricamento del modello generativo «${opt.title}»")
+            generator = SdInpainter(java.io.File(ModelManager.modelsDir, "sd2inpaint"))
+        }
+        return generator!!
+    }
+
+    @Synchronized
+    fun upscaler(): Upscaler {
+        val opt = ModelManager.activeOption(Kind.UPSCALE)
+            ?: error("Modello di ingrandimento non scaricato: scaricalo dal pannello «Modelli IA»")
+        if (upscaler == null || upscalerId != opt.id) {
+            upscaler?.close()
+            AppLog.i("Caricamento del modello di ingrandimento «${opt.title}»")
+            upscaler = Upscaler(ModelManager.file(opt.files[0]).absolutePath)
+            upscalerId = opt.id
+        }
+        return upscaler!!
+    }
+
+    @Synchronized
+    fun bgRemover(): BackgroundRemover {
+        val opt = ModelManager.activeOption(Kind.BGREMOVE)
+            ?: error("Modello per lo sfondo non scaricato: scaricalo dal pannello «Modelli IA»")
+        if (bgRemover == null || bgRemoverId != opt.id) {
+            bgRemover?.close()
+            AppLog.i("Caricamento del modello per lo sfondo «${opt.title}»")
+            bgRemover = BackgroundRemover(ModelManager.file(opt.files[0]).absolutePath, if (opt.id == "isnet") 1024 else 320)
+            bgRemoverId = opt.id
+        }
+        return bgRemover!!
     }
 
     private var inpainter: Inpainter? = null

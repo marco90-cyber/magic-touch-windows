@@ -144,6 +144,7 @@ class EditorState(private val scope: CoroutineScope) {
                     AppLog.i("Aperta «${file.name}» (${img.width}×${img.height} px)")
                     image = img
                     savedImage = img
+                    transparent = false
                     original = img
                     mask = ByteArray(img.width * img.height)
                     fileName = file.name
@@ -159,6 +160,7 @@ class EditorState(private val scope: CoroutineScope) {
     }
 
     fun close() {
+        transparent = false
         image = null; original = null; mask = ByteArray(0); fileName = ""; hasMask = false
         states.clear(); pos = -1; version++
     }
@@ -507,6 +509,79 @@ class EditorState(private val scope: CoroutineScope) {
                 }
             }
         }
+    }
+
+    // =====================================================================
+    // funzioni IA aggiuntive: generativa, ingrandimento, sfondo
+    // =====================================================================
+
+    var transparent by mutableStateOf(false)   // l'immagine ha zone trasparenti (si disegna la scacchiera)
+    var showGenerate by mutableStateOf(false)  // finestra «Genera con IA»
+
+    private fun progressText(s: String) { scope.launch(Dispatchers.Main) { busyText = s } }
+
+    /** Esegue [job] in background e, se produce un'immagine, la applica come nuovo passo della cronologia. */
+    private fun imageJob(
+        busyMsg: String, doneLabel: String, resetMask: Boolean, newSize: Boolean = false, alpha: Boolean = false,
+        job: suspend (BufferedImage) -> BufferedImage?,
+    ) {
+        val img = image ?: return
+        if (busy) return
+        busy = true; busyText = busyMsg
+        scope.launch(Dispatchers.Default) {
+            val t0 = System.currentTimeMillis()
+            var r = runCatching { job(img) }
+            if (r.isFailure && Gpu.active && r.exceptionOrNull() !is OutOfMemoryError) {
+                Gpu.fallbackToCpu()
+                r = runCatching { job(img) }
+            }
+            r.exceptionOrNull()?.let {
+                AppLog.e("$doneLabel non riuscito", it)
+                if (it is OutOfMemoryError) withContext(Dispatchers.Main) { dropHistory() }
+            }
+            if (r.isSuccess) AppLog.i("$doneLabel completato in ${System.currentTimeMillis() - t0} ms")
+            val res = r.getOrNull()
+            val err = r.exceptionOrNull()?.let { it.message ?: it.toString() }
+            withContext(Dispatchers.Main) {
+                busy = false
+                if (err != null) {
+                    message = err
+                } else if (res == null || image !== img) {
+                    message = "Niente da elaborare"
+                } else {
+                    image = res
+                    if (newSize) { original = res; needFit = true }
+                    if (resetMask || mask.size != res.width * res.height) {
+                        mask = ByteArray(res.width * res.height); hasMask = false
+                    }
+                    if (alpha) transparent = true
+                    version++
+                    commit(doneLabel)
+                    if (newSize) fit()
+                }
+            }
+        }
+    }
+
+    fun generate(prompt: String, steps: Int, guidance: Float) {
+        if (!hasMask) { message = "Seleziona prima la zona da generare"; return }
+        val m = mask.copyOf()
+        val ex = expand.toInt()
+        val feather = ((1f - hardness) * 8f).toInt()
+        imageJob("Generazione con l'IA…", "Generazione IA", resetMask = true) { img ->
+            val g = Engines.generator()
+            g.prompt = prompt; g.steps = steps; g.guidance = guidance
+            g.onProgress = { progressText(it) }
+            g.inpaint(img, m, ex, feather)
+        }
+    }
+
+    fun upscale() = imageJob("Ingrandimento con l'IA…", "Ingrandimento IA", resetMask = true, newSize = true) { img ->
+        Engines.upscaler().upscale(img) { progressText("Ingrandimento… ${(it * 100).toInt()}%") }
+    }
+
+    fun removeBackground() = imageJob("Rimozione dello sfondo…", "Rimozione sfondo", resetMask = true, alpha = true) { img ->
+        Engines.bgRemover().remove(img)
     }
 
     // =====================================================================
