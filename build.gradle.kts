@@ -14,6 +14,7 @@ dependencies {
     implementation(compose.materialIconsExtended)
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.8.1")
     implementation("com.microsoft.onnxruntime:onnxruntime:1.20.0")
+    implementation("net.java.dev.jna:jna:5.14.0")
 }
 
 val buildNumber = (findProperty("buildNumber") as String?) ?: "0"

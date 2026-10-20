@@ -590,6 +590,19 @@ private fun ModelsPanel() {
             Spacer(Modifier.width(6.dp))
             Text("Usa la GPU (DirectML)", color = PsText, fontSize = 12.sp)
         }
+        if (Gpu.adapters.isNotEmpty()) {
+            Text("Scheda video da usare (NVIDIA, AMD e Intel):", color = PsDim, fontSize = 11.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                var dev by remember { mutableIntStateOf(Gpu.device) }
+                PsButton("Auto", primary = dev < 0) { dev = -1; Gpu.device = -1 }
+                for (ad in Gpu.adapters.filter { !it.software }) {
+                    PsButton("#${ad.index}", primary = dev == ad.index) { dev = ad.index; Gpu.device = ad.index }
+                }
+            }
+            for (ad in Gpu.adapters.filter { !it.software }) {
+                Text("#${ad.index}  ${ad.name} · ${ad.vramMb} MB", color = PsDim, fontSize = 10.sp)
+            }
+        }
         Text(
             when {
                 !Gpu.available -> "GPU non inclusa in questa installazione: calcoli sulla CPU"
