@@ -66,6 +66,21 @@ class EditorState(private val scope: CoroutineScope) {
     var showSysInfo by mutableStateOf(false)      // finestra «Informazioni sistema»
     var ctxPos by mutableStateOf<Offset?>(null)   // menu del tasto destro (coordinate schermo nella tela)
     var exitApp: () -> Unit = {}
+    var crashText by mutableStateOf<String?>(null)  // messaggio mostrato quando l'app va in errore grave
+
+    /** Chiamata da qualsiasi thread: apre la finestra "salva il registro". */
+    fun reportCrash(text: String) {
+        scope.launch(Dispatchers.Main) { crashText = text }
+    }
+
+    /** Libera memoria: tiene solo lo stato corrente nella cronologia. */
+    private fun dropHistory() {
+        if (states.size > 1 && pos in states.indices) {
+            val cur = states[pos]
+            states.clear(); states.add(cur); pos = 0
+        }
+        System.gc()
+    }
 
     // ---- stato di lavoro ----
     var busy by mutableStateOf(false); private set
@@ -171,6 +186,10 @@ class EditorState(private val scope: CoroutineScope) {
         states.add(HistoryState(img, mask.copyOf(), label))
         pos = states.size - 1
         while (states.size > MAX_HISTORY) { states.removeAt(0); pos-- }
+        // limite di memoria: la cronologia non può occupare più di ~35% dell'heap
+        val budget = Runtime.getRuntime().maxMemory() * 35 / 100
+        fun used() = states.sumOf { it.image.width.toLong() * it.image.height * 4 + it.mask.size }
+        while (states.size > 2 && used() > budget) { states.removeAt(0); pos-- }
     }
 
     fun goTo(i: Int) {
@@ -437,7 +456,14 @@ class EditorState(private val scope: CoroutineScope) {
         scope.launch(Dispatchers.Default) {
             val t0 = System.currentTimeMillis()
             val r = runCatching { Engines.inpainter().inpaint(img, m, ex, feather) }
-            r.exceptionOrNull()?.let { AppLog.e("Rimozione non riuscita", it) }
+            r.exceptionOrNull()?.let {
+                AppLog.e("Rimozione non riuscita", it)
+                if (it is OutOfMemoryError) {
+                    withContext(Dispatchers.Main) { dropHistory() }
+                    reportCrash("Memoria insufficiente durante la rimozione (immagine molto grande). " +
+                        "Ho liberato la cronologia: riprova, oppure usa un'immagine più piccola.")
+                }
+            }
             if (r.isSuccess) AppLog.i("Rimozione con l'IA completata in ${System.currentTimeMillis() - t0} ms (espansione $ex px, sfumatura $feather)")
             val res: BufferedImage? = r.getOrNull()
             val err: String? = r.exceptionOrNull()?.let { it.message ?: it.toString() }

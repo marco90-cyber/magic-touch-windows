@@ -177,6 +177,7 @@ fun App(st: EditorState) {
 
     if (showAbout) AboutDialog { showAbout = false }
     if (st.showLog) LogDialog(st)
+    if (st.crashText != null) CrashDialog(st)
     if (st.showExport) ExportDialog(st)
     if (st.showSysInfo) SysInfoDialog(st)
     if (Updater.dialogOpen) UpdateDialog(st)
@@ -723,6 +724,9 @@ private fun LogDialog(st: EditorState) {
                 Text("Registro eventi", color = PsText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("${entries.size} righe", color = PsDim, fontSize = 12.sp)
+                    PsButton("Salva in .txt", primary = true) { st.exportLogDialog() }
+                    PsButton("Copia") { copyLog(st) }
+                    PsButton("Cancella") { AppLog.clear(); AppLog.i("Registro cancellato") }
                     PsButton("Chiudi") { st.showLog = false }
                 }
             }
@@ -749,18 +753,43 @@ private fun LogDialog(st: EditorState) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 PsButton("Esporta in .txt…", primary = true) { st.exportLogDialog() }
-                PsButton("Copia tutto") {
-                    try {
-                        Toolkit.getDefaultToolkit().systemClipboard
-                            .setContents(StringSelection(AppLog.asText(st.imageInfo())), null)
-                        st.message = "Registro copiato negli appunti"
-                    } catch (e: Exception) {
-                        st.message = "Impossibile copiare: ${e.message}"
-                    }
-                }
+                PsButton("Copia tutto") { copyLog(st) }
                 PsButton("Cancella") { AppLog.clear(); AppLog.i("Registro cancellato") }
                 Spacer(Modifier.weight(1f))
                 PsButton("Chiudi") { st.showLog = false }
+            }
+        }
+    }
+}
+
+private fun copyLog(st: EditorState) {
+    try {
+        Toolkit.getDefaultToolkit().systemClipboard
+            .setContents(StringSelection(AppLog.asText(st.imageInfo())), null)
+        st.message = "Registro copiato negli appunti"
+    } catch (e: Exception) {
+        st.message = "Impossibile copiare: ${e.message}"
+    }
+}
+
+@Composable
+private fun CrashDialog(st: EditorState) {
+    val text = st.crashText ?: return
+    Dialog(onDismissRequest = { st.crashText = null }) {
+        Column(
+            Modifier.width(520.dp).clip(RoundedCornerShape(6.dp)).background(PsPanel)
+                .border(1.dp, PsError, RoundedCornerShape(6.dp)).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text("Si è verificato un errore", color = PsError, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Text(text, color = PsText, fontSize = 12.sp)
+            Text("Vuoi salvare il registro eventi per capire cosa è successo?", color = PsDim, fontSize = 12.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                PsButton("Salva registro…", primary = true) { st.exportLogDialog() }
+                PsButton("Copia") { copyLog(st) }
+                PsButton("Vedi registro") { st.crashText = null; st.showLog = true }
+                Spacer(Modifier.weight(1f))
+                PsButton("Chiudi") { st.crashText = null }
             }
         }
     }

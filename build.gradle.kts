@@ -26,6 +26,7 @@ tasks.processResources {
 compose.desktop {
     application {
         mainClass = "com.marco.magictouchremove.MainKt"
+        jvmArgs += listOf("-XX:MaxRAMPercentage=75", "-Xss4m")
         nativeDistributions {
             targetFormats(TargetFormat.Msi, TargetFormat.Exe)
             packageName = "MagicTouchRemove"

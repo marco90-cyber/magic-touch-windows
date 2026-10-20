@@ -31,6 +31,8 @@ import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 
+@Volatile private var stRef: EditorState? = null
+
 fun main() = application {
     val scope = rememberCoroutineScope()
     val st = remember {
@@ -38,11 +40,12 @@ fun main() = application {
         val prev = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { t, e ->
             AppLog.e("Errore non gestito nel thread «${t.name}»", e)
-            prev?.uncaughtException(t, e)
+            stRef?.reportCrash("Errore imprevisto: ${e.message ?: e.toString()}")
+            if (stRef == null) prev?.uncaughtException(t, e)
         }
         AppLog.i("Avvio di Magic Touch Remove $APP_VERSION · ${System.getProperty("os.name")} ${System.getProperty("os.version")} · Java ${System.getProperty("java.version")}")
         AppLog.i("Modelli installati: " + (ALL_OPTIONS.filter { ModelManager.isInstalled(it) }.joinToString(", ") { it.title }.ifEmpty { "nessuno" }))
-        EditorState(scope)
+        EditorState(scope).also { stRef = it }
     }
     remember { st.exitApp = ::exitApplication }
 
