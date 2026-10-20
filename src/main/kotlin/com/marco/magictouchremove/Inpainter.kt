@@ -162,9 +162,7 @@ abstract class Inpainter {
 }
 
 private fun newSession(env: OrtEnvironment, path: String): OrtSession {
-    val opts = OrtSession.SessionOptions()
-    opts.setIntraOpNumThreads(Runtime.getRuntime().availableProcessors().coerceIn(2, 16))
-    return env.createSession(path, opts)
+    return Gpu.session(env, path)
 }
 
 /** LaMa (big-lama): immagine float 0..1, maschera 1 = da ricostruire. */

@@ -26,8 +26,9 @@ tasks.processResources {
 compose.desktop {
     application {
         mainClass = "com.marco.magictouchremove.MainKt"
-        jvmArgs += listOf("-XX:MaxRAMPercentage=75", "-Xss4m")
+        jvmArgs += listOf("-XX:MaxRAMPercentage=75", "-Xss4m", "-XX:MinHeapFreeRatio=10", "-XX:MaxHeapFreeRatio=30", "-XX:G1PeriodicGCInterval=15000")
         nativeDistributions {
+            appResourcesRootDir.set(project.layout.projectDirectory.dir("appres"))
             targetFormats(TargetFormat.Msi, TargetFormat.Exe)
             packageName = "MagicTouchRemove"
             packageVersion = (findProperty("msiVersion") as String?) ?: "1.0.0"

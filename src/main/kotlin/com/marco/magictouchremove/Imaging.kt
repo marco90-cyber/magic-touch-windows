@@ -130,19 +130,72 @@ private fun applyOrientation(src: BufferedImage, o: Int): BufferedImage {
 }
 
 /** Apre un'immagine (JPEG, PNG, BMP…) rispettando l'orientamento EXIF. Ritorna null se non leggibile. */
+private const val MAX_PIXELS = 40_000_000L
+
+/** Decodifica con ImageIO; le foto enormi vengono lette direttamente a risoluzione ridotta (meno RAM). */
+private fun decode(input: Any): BufferedImage? {
+    ImageIO.createImageInputStream(input).use { iis ->
+        val readers = ImageIO.getImageReaders(iis)
+        if (!readers.hasNext()) return null
+        val r = readers.next()
+        try {
+            r.input = iis
+            val w = r.getWidth(0)
+            val h = r.getHeight(0)
+            val param = r.defaultReadParam
+            val px = w.toLong() * h
+            if (px > MAX_PIXELS) {
+                val f = Math.ceil(Math.sqrt(px / MAX_PIXELS.toDouble())).toInt()
+                param.setSourceSubsampling(f, f, 0, 0)
+                AppLog.i("Foto molto grande (${w}×${h} px, ${px / 1_000_000} MP): ridotta di $f volte in lettura per risparmiare memoria")
+            }
+            return r.read(0, param)
+        } finally {
+            r.dispose()
+        }
+    }
+}
+
+/** Alcuni JPEG (MPO, foto con anteprime incollate) hanno più immagini: tengo solo la prima. */
+private fun firstJpegOnly(b: ByteArray): ByteArray? {
+    if (b.size < 4 || b[0] != 0xFF.toByte() || b[1] != 0xD8.toByte()) return null
+    var i = 2
+    while (i + 3 < b.size) {
+        if (b[i] != 0xFF.toByte()) { i++; continue }
+        val m = b[i + 1].toInt() and 0xFF
+        when {
+            m == 0xFF -> i++
+            m == 0x00 || m == 0x01 || m in 0xD0..0xD8 -> i += 2
+            m == 0xD9 -> return b.copyOf(i + 2)
+            else -> i += 2 + (((b[i + 2].toInt() and 0xFF) shl 8) or (b[i + 3].toInt() and 0xFF))
+        }
+    }
+    return null
+}
+
 fun loadImage(file: File): BufferedImage? {
-    val raw = try {
-        ImageIO.read(file)
+    var raw: BufferedImage? = try {
+        decode(file)
     } catch (e: Throwable) {
         if (e is OutOfMemoryError) throw e
-        AppLog.w("Lettura standard non riuscita (${e.javaClass.simpleName}: ${e.message}), provo il decodificatore alternativo")
+        AppLog.w("Lettura standard non riuscita (${e.javaClass.simpleName}: ${e.message}), provo a leggere solo la prima immagine del file")
         null
-    } ?: readWithToolkit(file) ?: return null
-    val argb = if (raw.type == BufferedImage.TYPE_INT_ARGB) raw else raw.copyImage()
+    }
+    if (raw == null) {
+        raw = try {
+            firstJpegOnly(file.readBytes())?.let { decode(java.io.ByteArrayInputStream(it)) }
+        } catch (e: Throwable) {
+            if (e is OutOfMemoryError) throw e
+            AppLog.w("Anche la lettura della prima immagine è fallita (${e.javaClass.simpleName}: ${e.message})")
+            null
+        }
+    }
+    if (raw == null) raw = readWithToolkit(file)
+    val img = raw ?: return null
+    val argb = if (img.type == BufferedImage.TYPE_INT_ARGB) img else img.copyImage()
     val isJpeg = file.extension.lowercase().let { it == "jpg" || it == "jpeg" }
     return if (isJpeg) applyOrientation(argb, exifOrientation(file)) else argb
 }
-
 
 /** Decodificatore alternativo (AWT): accetta anche JPEG con profili colore o formati che ImageIO rifiuta. */
 private fun readWithToolkit(file: File): BufferedImage? {

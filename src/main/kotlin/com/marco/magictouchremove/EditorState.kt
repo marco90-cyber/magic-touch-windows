@@ -204,7 +204,7 @@ class EditorState(private val scope: CoroutineScope) {
         pos = states.size - 1
         while (states.size > MAX_HISTORY) { states.removeAt(0); pos-- }
         // limite di memoria: la cronologia non può occupare più di ~35% dell'heap
-        val budget = Runtime.getRuntime().maxMemory() * 35 / 100
+        val budget = Runtime.getRuntime().maxMemory() * 25 / 100
         fun used() = states.sumOf { it.image.width.toLong() * it.image.height * 4 + it.mask.size }
         while (states.size > 2 && used() > budget) { states.removeAt(0); pos-- }
     }
@@ -435,7 +435,11 @@ class EditorState(private val scope: CoroutineScope) {
         busy = true; busyText = "Selezione automatica…"
         scope.launch(Dispatchers.Default) {
             val t0 = System.currentTimeMillis()
-            val r = runCatching { Engines.segmenter().select(img, point, box) }
+            var r = runCatching { Engines.segmenter().select(img, point, box) }
+            if (r.isFailure && Gpu.active && r.exceptionOrNull() !is OutOfMemoryError) {
+                Gpu.fallbackToCpu()
+                r = runCatching { Engines.segmenter().select(img, point, box) }
+            }
             r.exceptionOrNull()?.let { AppLog.e("Selezione automatica non riuscita", it) }
             if (r.isSuccess) AppLog.i("Selezione automatica (${if (box != null) "riquadro" else "clic"}): " +
                 (if (r.getOrNull() != null) "oggetto trovato" else "nessun oggetto") + " in ${System.currentTimeMillis() - t0} ms")
@@ -472,7 +476,11 @@ class EditorState(private val scope: CoroutineScope) {
         val feather = ((1f - hardness) * 8f).toInt()
         scope.launch(Dispatchers.Default) {
             val t0 = System.currentTimeMillis()
-            val r = runCatching { Engines.inpainter().inpaint(img, m, ex, feather) }
+            var r = runCatching { Engines.inpainter().inpaint(img, m, ex, feather) }
+            if (r.isFailure && Gpu.active && r.exceptionOrNull() !is OutOfMemoryError) {
+                Gpu.fallbackToCpu()
+                r = runCatching { Engines.inpainter().inpaint(img, m, ex, feather) }
+            }
             r.exceptionOrNull()?.let {
                 AppLog.e("Rimozione non riuscita", it)
                 if (it is OutOfMemoryError) {

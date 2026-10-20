@@ -34,6 +34,7 @@ import androidx.compose.ui.window.rememberWindowState
 @Volatile private var stRef: EditorState? = null
 
 fun main() = application {
+    remember { Gpu.init() }
     val scope = rememberCoroutineScope()
     val st = remember {
         AppLog.trimFileOnStart()

@@ -58,6 +58,13 @@ fun CanvasView(st: EditorState, modifier: Modifier = Modifier) {
             .pointerHoverIcon(icon)
             .onPointerEvent(PointerEventType.Move) { st.hover = it.changes.first().position }
             .onPointerEvent(PointerEventType.Exit) { st.hover = null }
+            .onPointerEvent(PointerEventType.Press) {
+                // tasto destro sull'immagine: menu dello strumento (rilevato qui perché i gesti standard sono solo per il tasto sinistro)
+                if (it.buttons.isSecondaryPressed && st.image != null && !st.busy) {
+                    st.ctxPos = it.changes.first().position
+                    it.changes.forEach { c -> c.consume() }
+                }
+            }
             .onPointerEvent(PointerEventType.Scroll) {
                 val c = it.changes.first()
                 val dy = c.scrollDelta.y
@@ -68,7 +75,7 @@ fun CanvasView(st: EditorState, modifier: Modifier = Modifier) {
                     val down = awaitFirstDown(requireUnconsumed = false)
                     if (st.image == null || st.busy) return@awaitEachGesture
                     val buttons = currentEvent.buttons
-                    if (buttons.isSecondaryPressed) {
+                    if (buttons.isSecondaryPressed || down.type != androidx.compose.ui.input.pointer.PointerType.Mouse && false) {
                         // tasto destro: menu dello strumento attivo (come in Photoshop)
                         st.ctxPos = down.position
                         down.consume()

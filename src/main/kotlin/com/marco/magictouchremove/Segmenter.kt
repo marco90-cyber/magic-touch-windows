@@ -29,8 +29,8 @@ private fun sessionOptions(): OrtSession.SessionOptions {
 
 class MobileSamSegmenter(encoderPath: String, decoderPath: String) : Segmenter() {
     private val env = OrtEnvironment.getEnvironment()
-    private val encoder: OrtSession = env.createSession(encoderPath, sessionOptions())
-    private val decoder: OrtSession = env.createSession(decoderPath, sessionOptions())
+    private val encoder: OrtSession = Gpu.session(env, encoderPath)
+    private val decoder: OrtSession = Gpu.session(env, decoderPath)
     private val encoderInput: String = encoder.inputNames.first()
 
     private var embeddedFor: BufferedImage? = null
@@ -133,8 +133,8 @@ class MobileSamSegmenter(encoderPath: String, decoderPath: String) : Segmenter()
 /** SAM 2 Tiny (Meta): foto 1024×1024 normalizzata; le maschere escono a 256×256 e vengono ingrandite in modo morbido. */
 class Sam2Segmenter(encoderPath: String, decoderPath: String) : Segmenter() {
     private val env = OrtEnvironment.getEnvironment()
-    private val encoder: OrtSession = env.createSession(encoderPath, sessionOptions())
-    private val decoder: OrtSession = env.createSession(decoderPath, sessionOptions())
+    private val encoder: OrtSession = Gpu.session(env, encoderPath)
+    private val decoder: OrtSession = Gpu.session(env, decoderPath)
     private var embeddedFor: BufferedImage? = null
     private var embed: FloatArray? = null
     private var feat0: FloatArray? = null

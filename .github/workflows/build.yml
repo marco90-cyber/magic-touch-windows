@@ -21,6 +21,23 @@ jobs:
         with:
           gradle-version: 8.9
 
+      - name: Librerie GPU (DirectML)
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $dst = "appres/windows-x64"
+          New-Item -ItemType Directory -Force $dst | Out-Null
+          Invoke-WebRequest "https://www.nuget.org/api/v2/package/Microsoft.ML.OnnxRuntime.DirectML/1.20.0" -OutFile ortdml.zip
+          Expand-Archive ortdml.zip ortdml
+          Copy-Item "ortdml/runtimes/win-x64/native/*.dll" $dst
+          Invoke-WebRequest "https://www.nuget.org/api/v2/package/Microsoft.AI.DirectML/1.15.4" -OutFile dml.zip
+          Expand-Archive dml.zip dml
+          Copy-Item "dml/bin/x64-win/DirectML.dll" $dst
+          Invoke-WebRequest "https://repo1.maven.org/maven2/com/microsoft/onnxruntime/onnxruntime/1.20.0/onnxruntime-1.20.0.jar" -OutFile ort.jar
+          Expand-Archive ort.jar ortjar
+          Copy-Item "ortjar/ai/onnxruntime/native/win-x64/onnxruntime4j_jni.dll" $dst
+          Get-ChildItem $dst | Select-Object Name, Length
+
       - name: Compila e crea la versione portatile
         shell: bash
         run: |

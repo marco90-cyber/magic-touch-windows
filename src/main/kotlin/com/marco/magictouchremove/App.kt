@@ -567,6 +567,28 @@ private fun ModelsPanel() {
     Column(Modifier.verticalScroll(rememberScrollState()).padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         ModelGroup("Rimozione oggetti", Kind.INPAINT, scope)
         ModelGroup("Selezione automatica", Kind.SELECT, scope)
+        var gpuOn by remember { mutableStateOf(Gpu.enabled) }
+        Row(
+            Modifier.clip(RoundedCornerShape(3.dp)).clickable { gpuOn = !gpuOn; Gpu.enabled = gpuOn }.padding(vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                Modifier.size(14.dp).clip(RoundedCornerShape(2.dp))
+                    .background(if (gpuOn) PsAccent else Color(0xFF1F1F1F)).border(1.dp, PsBorder),
+                contentAlignment = Alignment.Center
+            ) { if (gpuOn) Icon(Icons.Filled.Check, null, tint = Color.White, modifier = Modifier.size(11.dp)) }
+            Spacer(Modifier.width(6.dp))
+            Text("Usa la GPU (DirectML)", color = PsText, fontSize = 12.sp)
+        }
+        Text(
+            when {
+                !Gpu.available -> "GPU non inclusa in questa installazione: calcoli sulla CPU"
+                !gpuOn -> "GPU disattivata: calcoli sulla CPU"
+                Gpu.active -> "GPU attiva"
+                else -> "GPU pronta: verrà usata al prossimo caricamento di un modello"
+            },
+            color = PsDim, fontSize = 11.sp
+        )
         Text("Spazio usato dai modelli: ${formatBytes(used)}", color = PsDim, fontSize = 11.sp)
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             PsButton("Apri cartella") { ModelManager.openFolder() }
