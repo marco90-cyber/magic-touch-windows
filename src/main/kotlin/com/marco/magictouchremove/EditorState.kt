@@ -62,6 +62,8 @@ class EditorState(private val scope: CoroutineScope) {
     var comparing by mutableStateOf(false)
     var zoomOut by mutableStateOf(false)          // strumento Zoom: true = riduci
     var showLog by mutableStateOf(false)          // finestra «Registro eventi»
+    var showExport by mutableStateOf(false)       // finestra «Salva con nome»
+    var exitApp: () -> Unit = {}
 
     // ---- stato di lavoro ----
     var busy by mutableStateOf(false); private set
@@ -127,16 +129,30 @@ class EditorState(private val scope: CoroutineScope) {
         states.clear(); pos = -1; version++
     }
 
-    fun save(file: File) {
+    fun save(file: File, o: ExportOptions) {
         val img = image ?: return
         if (busy) return
         busy = true; busyText = "Salvataggio…"
         scope.launch(Dispatchers.IO) {
-            val err = try { writeImage(img, file); null } catch (e: Throwable) { e.message ?: e.toString() }
+            val t0 = System.currentTimeMillis()
+            val r = runCatching {
+                val bytes = encodeImage(img, o)
+                file.writeBytes(bytes)
+                bytes.size.toLong()
+            }
+            val err = r.exceptionOrNull()
             withContext(Dispatchers.Main) {
                 busy = false
-                message = err?.let { "Salvataggio non riuscito: $it" } ?: "Salvato: ${file.name}"
-                if (err != null) AppLog.e("Salvataggio non riuscito (${file.path}): $err") else AppLog.i("Salvata la foto in ${file.path}")
+                if (err != null) {
+                    message = "Salvataggio non riuscito: ${err.message}"
+                    AppLog.e("Salvataggio non riuscito (${file.path})", err)
+                } else {
+                    val (w, h) = scaledSize(img, o.scale)
+                    message = "Salvato: ${file.name}"
+                    AppLog.i("Salvata la foto in ${file.path} · ${o.format.label}" +
+                        (if (o.format.lossy) " qualità ${o.quality}%" else "") +
+                        " · ${scaleLabel(o.scale)} (${w}×${h} px) · ${formatBytes(r.getOrNull() ?: 0L)} · ${System.currentTimeMillis() - t0} ms")
+                }
             }
         }
     }
@@ -446,25 +462,5 @@ class EditorState(private val scope: CoroutineScope) {
 
     companion object {
         const val MAX_HISTORY = 30
-    }
-}
-
-/** Scrive un'immagine in PNG o JPEG (qualità alta) secondo l'estensione del file. */
-fun writeImage(img: BufferedImage, file: File) {
-    val ext = file.extension.lowercase()
-    if (ext == "jpg" || ext == "jpeg") {
-        val writer = ImageIO.getImageWritersByFormatName("jpeg").next()
-        val param = writer.defaultWriteParam
-        param.compressionMode = ImageWriteParam.MODE_EXPLICIT
-        param.compressionQuality = 0.95f
-        file.delete()
-        ImageIO.createImageOutputStream(file).use { out ->
-            writer.output = out
-            writer.write(null, IIOImage(toRgb(img), null, null), param)
-        }
-        writer.dispose()
-    } else {
-        val target = if (ext == "png") file else File(file.path + ".png")
-        if (!ImageIO.write(img, "png", target)) error("formato non supportato")
     }
 }

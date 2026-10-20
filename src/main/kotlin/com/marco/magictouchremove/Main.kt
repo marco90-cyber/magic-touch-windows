@@ -4,6 +4,15 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.graphics.painter.BitmapPainter
+import androidx.compose.ui.graphics.toComposeImageBitmap
+import androidx.compose.ui.window.Notification
+import androidx.compose.ui.window.Tray
+import androidx.compose.ui.window.rememberTrayState
+import kotlinx.coroutines.delay
+import java.awt.RenderingHints
+import java.awt.image.BufferedImage
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
@@ -35,6 +44,37 @@ fun main() = application {
         AppLog.i("Modelli installati: " + (ALL_OPTIONS.filter { ModelManager.isInstalled(it) }.joinToString(", ") { it.title }.ifEmpty { "nessuno" }))
         EditorState(scope)
     }
+    remember { st.exitApp = ::exitApplication }
+
+    // controllo automatico all'avvio (se attivo) dopo qualche secondo
+    LaunchedEffect(Unit) {
+        delay(4000)
+        if (Updater.autoCheck) Updater.check(false)
+    }
+
+    // notifica di Windows quando c'è un aggiornamento
+    val trayState = rememberTrayState()
+    val upd = Updater.info
+    if (Updater.status == UpdateStatus.AVAILABLE && upd != null) {
+        val icon = remember { BitmapPainter(trayIconImage().toComposeImageBitmap()) }
+        Tray(
+            icon = icon,
+            state = trayState,
+            tooltip = "Magic Touch Remove: aggiornamento ${upd.name} disponibile",
+            onAction = { Updater.dialogOpen = true }
+        )
+        LaunchedEffect(upd.build) {
+            delay(800)
+            trayState.sendNotification(
+                Notification(
+                    "Aggiornamento disponibile",
+                    "È disponibile la versione ${upd.name} di Magic Touch Remove. Apri il menu Aggiornamenti per installarla.",
+                    Notification.Type.Info
+                )
+            )
+        }
+    }
+
     val winState = rememberWindowState(size = DpSize(1360.dp, 860.dp), position = WindowPosition(Alignment.Center))
 
     val title = if (st.image != null) "${st.fileName} — Magic Touch Remove" else "Magic Touch Remove"
@@ -88,4 +128,18 @@ fun main() = application {
             }
         }
     }
+}
+
+/** Icona per l'area di notifica di Windows. */
+private fun trayIconImage(): BufferedImage {
+    val img = BufferedImage(32, 32, BufferedImage.TYPE_INT_ARGB)
+    val g = img.createGraphics()
+    g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+    g.color = java.awt.Color(0x2D, 0x8C, 0xEB)
+    g.fillRoundRect(1, 1, 30, 30, 8, 8)
+    g.color = java.awt.Color.WHITE
+    g.font = java.awt.Font("SansSerif", java.awt.Font.BOLD, 20)
+    g.drawString("M", 7, 24)
+    g.dispose()
+    return img
 }

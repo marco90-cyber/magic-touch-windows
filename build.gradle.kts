@@ -16,6 +16,13 @@ dependencies {
     implementation("com.microsoft.onnxruntime:onnxruntime:1.20.0")
 }
 
+val buildNumber = (findProperty("buildNumber") as String?) ?: "0"
+
+tasks.processResources {
+    inputs.property("build", buildNumber)
+    filesMatching("version.properties") { expand(mapOf("build" to buildNumber)) }
+}
+
 compose.desktop {
     application {
         mainClass = "com.marco.magictouchremove.MainKt"

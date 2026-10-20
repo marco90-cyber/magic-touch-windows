@@ -51,6 +51,7 @@ fun PsSlider(
     valueText: String,
     onChange: (Float) -> Unit,
     modifier: Modifier = Modifier,
+    trackWidth: androidx.compose.ui.unit.Dp = 110.dp,
 ) {
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
         Text(label, color = PsDim, fontSize = 12.sp)
@@ -60,7 +61,7 @@ fun PsSlider(
         fun set(x: Float) = onChange(min + (x / w).coerceIn(0f, 1f) * (max - min))
         Canvas(
             Modifier
-                .width(110.dp)
+                .width(trackWidth)
                 .height(22.dp)
                 .onSizeChanged { w = it.width.coerceAtLeast(1) }
                 .pointerInput(w) { detectTapGestures { set(it.x) } }

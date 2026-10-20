@@ -25,7 +25,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          gradle createDistributable -PmsiVersion=1.0.${{ github.run_number }} --no-daemon --stacktrace 2>&1 | tee build.log || {
+          gradle createDistributable -PmsiVersion=1.0.${{ github.run_number }} -PbuildNumber=${{ github.run_number }} --no-daemon --stacktrace 2>&1 | tee build.log || {
             grep -E "^e: " build.log | head -30 | while IFS= read -r l; do echo "::error::${l}"; done
             exit 1
           }
@@ -42,7 +42,7 @@ jobs:
         run: |
           $wix = "C:\Program Files (x86)\WiX Toolset v3.14\bin"
           if (Test-Path $wix) { $env:PATH = "$wix;$env:PATH" }
-          gradle packageMsi "-PmsiVersion=1.0.${{ github.run_number }}" --no-daemon --stacktrace
+          gradle packageMsi "-PmsiVersion=1.0.${{ github.run_number }}" "-PbuildNumber=${{ github.run_number }}" --no-daemon --stacktrace
           $msi = Get-ChildItem -Path build/compose/binaries -Recurse -Filter *.msi | Select-Object -First 1
           if ($msi) { Copy-Item $msi.FullName "MagicTouchRemove-Windows-v1.${{ github.run_number }}.msi" }
 
@@ -59,11 +59,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           COMMIT_MSG: ${{ github.event.head_commit.message }}
         run: |
+          TAG="v1.${{ github.run_number }}"
           NOTES=$(printf '%s' "$COMMIT_MSG" | head -n 1)
           [ -z "$NOTES" ] && NOTES="Build automatica"
-          gh release create "v1.${{ github.run_number }}" MagicTouchRemove-Windows-*.zip MagicTouchRemove-Windows-*.msi \
-            --target "${{ github.sha }}" --title "Magic Touch Remove per Windows v1.${{ github.run_number }}" \
-            --notes "$NOTES" || \
-          gh release create "v1.${{ github.run_number }}" MagicTouchRemove-Windows-*.zip \
-            --target "${{ github.sha }}" --title "Magic Touch Remove per Windows v1.${{ github.run_number }}" \
-            --notes "$NOTES"
+          ls -la MagicTouchRemove-Windows-* || true
+          gh release create "$TAG" --target "${{ github.sha }}" \
+            --title "Magic Touch Remove per Windows v1.${{ github.run_number }}" --notes "$NOTES" --latest
+          for f in MagicTouchRemove-Windows-*.zip MagicTouchRemove-Windows-*.msi; do
+            if [ -f "$f" ]; then gh release upload "$TAG" "$f" --clobber; fi
+          done
+          gh release view "$TAG" --json assets --jq '.assets[] | "\(.name) \(.size)"' | while IFS= read -r l; do echo "::notice::file nella release: $l"; done
+          COUNT=$(gh release view "$TAG" --json assets --jq '.assets | length')
+          if [ "$COUNT" -lt 1 ]; then echo "::error::La release non contiene nessun file"; exit 1; fi

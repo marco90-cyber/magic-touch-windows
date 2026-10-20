@@ -20,6 +20,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableFloatStateOf
+import kotlin.math.roundToInt
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.window.Dialog
@@ -119,11 +124,7 @@ fun EditorState.exportLogDialog() {
 
 fun EditorState.openDialog() { pickImageToOpen()?.let { open(it) } }
 
-fun EditorState.saveDialog() {
-    if (image == null) return
-    val base = fileName.substringBeforeLast('.', fileName)
-    pickImageToSave("$base-ripulita.png")?.let { save(it) }
-}
+fun EditorState.saveDialog() { if (image != null) showExport = true }
 
 // =========================================================================
 // Schermata principale
@@ -143,6 +144,7 @@ fun App(st: EditorState) {
     Column(Modifier.fillMaxSize().background(PsPanel)) {
         MenuBar(st, onAbout = { showAbout = true })
         OptionsBar(st)
+        UpdateBanner(st)
         Row(Modifier.weight(1f).fillMaxWidth()) {
             ToolBar(st)
             Column(Modifier.weight(1f).fillMaxHeight()) {
@@ -160,6 +162,8 @@ fun App(st: EditorState) {
 
     if (showAbout) AboutDialog { showAbout = false }
     if (st.showLog) LogDialog(st)
+    if (st.showExport) ExportDialog(st)
+    if (Updater.dialogOpen) UpdateDialog(st)
 }
 
 // =========================================================================
@@ -168,6 +172,7 @@ fun App(st: EditorState) {
 
 @Composable
 private fun MenuBar(st: EditorState, onAbout: () -> Unit) {
+    val scope = rememberCoroutineScope()
     Row(
         Modifier.fillMaxWidth().height(28.dp).background(PsPanelHeader),
         verticalAlignment = Alignment.CenterVertically
@@ -191,6 +196,14 @@ private fun MenuBar(st: EditorState, onAbout: () -> Unit) {
             Item("Dimensione reale (100%)", "Ctrl+1", st.image != null) { close(); st.actualSize() }
             Item("Ingrandisci", "Ctrl++", st.image != null) { close(); st.zoomAt(1.25f) }
             Item("Riduci", "Ctrl+-", st.image != null) { close(); st.zoomAt(0.8f) }
+        }
+        Menu(if (Updater.status == UpdateStatus.AVAILABLE) "Aggiornamenti ●" else "Aggiornamenti") { close ->
+            Item("Controlla aggiornamenti…", "") { close(); scope.launch { Updater.check(true) } }
+            if (Updater.status == UpdateStatus.AVAILABLE) {
+                Item("Installa la versione ${Updater.info?.name ?: ""}…", "") { close(); Updater.dialogOpen = true }
+            }
+            Item((if (Updater.autoCheck) "✓  " else "     ") + "Controlla all'avvio", "") { close(); Updater.changeAutoCheck(!Updater.autoCheck) }
+            Item("Pagina delle versioni (GitHub)", "") { close(); Updater.openReleasesPage() }
         }
         Menu("Aiuto") { close ->
             Item("Registro eventi…", "Ctrl+L") { close(); st.showLog = true }
@@ -624,6 +637,7 @@ private fun AboutDialog(onClose: () -> Unit) {
         text = {
             SelectionContainer {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Versione $APP_VERSION", color = PsText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                     Text(
                         "Rimozione di oggetti dalle foto con l'IA. Tutto gira sul tuo PC: le foto non vengono mai inviate a nessun server.",
                         color = PsText, fontSize = 12.sp
@@ -703,6 +717,197 @@ private fun LogDialog(st: EditorState) {
                 PsButton("Cancella") { AppLog.clear(); AppLog.i("Registro cancellato") }
                 Spacer(Modifier.weight(1f))
                 PsButton("Chiudi") { st.showLog = false }
+            }
+        }
+    }
+}
+
+// =========================================================================
+// Salva con nome: formato, risoluzione, qualità
+// =========================================================================
+
+@Composable
+private fun ExportDialog(st: EditorState) {
+    val img = st.image
+    if (img == null) { st.showExport = false; return }
+
+    var format by remember { mutableStateOf(ExportFormat.fromId(Prefs.get("exportFormat", "png"))) }
+    var scale by remember {
+        val saved = Prefs.get("exportScale", "1").toFloatOrNull() ?: 1f
+        mutableFloatStateOf(EXPORT_SCALES.minByOrNull { kotlin.math.abs(it - saved) } ?: 1f)
+    }
+    var quality by remember { mutableIntStateOf((Prefs.get("exportQuality", "95").toIntOrNull() ?: 95).coerceIn(80, 100)) }
+    var estimate by remember { mutableStateOf<String?>(null) }
+    val (w, h) = scaledSize(img, scale)
+
+    // stima del peso del file (la qualità conta solo per il JPEG)
+    LaunchedEffect(format, scale, if (format.lossy) quality else 0, img) {
+        estimate = null
+        delay(300)
+        val bytes = withContext(Dispatchers.Default) {
+            runCatching { encodeImage(img, ExportOptions(format, quality, scale)).size.toLong() }.getOrNull()
+        }
+        estimate = bytes?.let { formatBytes(it) } ?: "non disponibile"
+    }
+
+    Dialog(onDismissRequest = { st.showExport = false }) {
+        Column(
+            Modifier.width(560.dp).clip(RoundedCornerShape(6.dp)).background(PsPanel)
+                .border(1.dp, PsBorder, RoundedCornerShape(6.dp))
+        ) {
+            Text(
+                "Salva con nome", color = PsText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.fillMaxWidth().background(PsPanelHeader).padding(horizontal = 14.dp, vertical = 9.dp)
+            )
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Formato", color = PsDim, fontSize = 12.sp)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        for (f in ExportFormat.values()) PsButton(f.label, primary = f == format) { format = f }
+                    }
+                    Text(format.hint, color = PsDim, fontSize = 11.sp)
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Risoluzione", color = PsDim, fontSize = 12.sp)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        for (s in EXPORT_SCALES) PsButton(scaleLabel(s), primary = s == scale) { scale = s }
+                    }
+                    Text("$w × $h px", color = PsText, fontSize = 12.sp)
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Qualità", color = PsDim, fontSize = 12.sp)
+                    if (format.lossy) {
+                        PsSlider("", quality.toFloat(), 80f, 100f, "$quality%", { quality = it.roundToInt().coerceIn(80, 100) }, trackWidth = 300.dp)
+                    } else {
+                        Text("Non serve: ${format.label} non perde qualità.", color = PsDim, fontSize = 12.sp)
+                    }
+                }
+                Text(
+                    "Peso stimato: " + (estimate ?: "calcolo in corso…"),
+                    color = PsText, fontSize = 12.sp
+                )
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                PsButton("Annulla") { st.showExport = false }
+                PsButton("Salva…", primary = true) {
+                    Prefs.set("exportFormat", format.id)
+                    Prefs.set("exportScale", scale.toString())
+                    Prefs.set("exportQuality", quality.toString())
+                    val base = st.fileName.substringBeforeLast('.', st.fileName)
+                    val chosen = pickImageToSave("$base-ripulita.${format.ext}")
+                    if (chosen != null) {
+                        val file = if (format.accepts(chosen.extension)) chosen else File(chosen.path + "." + format.ext)
+                        st.showExport = false
+                        st.save(file, ExportOptions(format, quality, scale))
+                    }
+                }
+            }
+        }
+    }
+}
+
+// =========================================================================
+// Aggiornamenti
+// =========================================================================
+
+/** Barra di avviso sotto la barra delle opzioni, quando c'è una nuova versione. */
+@Composable
+private fun UpdateBanner(st: EditorState) {
+    val scope = rememberCoroutineScope()
+    val i = Updater.info
+    if (Updater.status != UpdateStatus.AVAILABLE || i == null || Updater.bannerDismissed || Updater.dialogOpen) return
+    Row(
+        Modifier.fillMaxWidth().height(32.dp).background(Color(0xFF1F4E79)).padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Text("È disponibile la versione ${i.name} di Magic Touch Remove", color = Color.White, fontSize = 12.sp)
+        Spacer(Modifier.weight(1f))
+        PsButton("Scarica e installa", primary = true) {
+            Updater.dialogOpen = true
+            scope.launch { Updater.downloadAndInstall { st.exitApp() } }
+        }
+        PsButton("Dettagli") { Updater.dialogOpen = true }
+        Text(
+            "✕", color = Color.White, fontSize = 14.sp,
+            modifier = Modifier.clickable { Updater.bannerDismissed = true }.padding(horizontal = 6.dp)
+        )
+    }
+}
+
+@Composable
+private fun UpdateDialog(st: EditorState) {
+    val scope = rememberCoroutineScope()
+    val status = Updater.status
+    val info = Updater.info
+    Dialog(onDismissRequest = { if (status != UpdateStatus.DOWNLOADING) Updater.dialogOpen = false }) {
+        Column(
+            Modifier.width(540.dp).clip(RoundedCornerShape(6.dp)).background(PsPanel)
+                .border(1.dp, PsBorder, RoundedCornerShape(6.dp))
+        ) {
+            Text(
+                "Aggiornamenti", color = PsText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.fillMaxWidth().background(PsPanelHeader).padding(horizontal = 14.dp, vertical = 9.dp)
+            )
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Versione installata: $APP_VERSION", color = PsDim, fontSize = 12.sp)
+                when (status) {
+                    UpdateStatus.IDLE, UpdateStatus.CHECKING -> {
+                        Text("Controllo degli aggiornamenti…", color = PsText, fontSize = 13.sp)
+                        LinearProgressIndicator(Modifier.fillMaxWidth(), color = PsAccent, trackColor = Color(0xFF1F1F1F))
+                    }
+                    UpdateStatus.UP_TO_DATE -> Text("Hai già l'ultima versione.", color = PsText, fontSize = 13.sp)
+                    UpdateStatus.AVAILABLE -> if (info != null) {
+                        Text("Disponibile la versione ${info.name}", color = PsText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            (if (info.msiUrl != null) "Installer" else "Zip portatile") + " · " + formatBytes(info.size),
+                            color = PsDim, fontSize = 12.sp
+                        )
+                        if (info.notes.isNotEmpty()) {
+                            Text("Novità", color = PsDim, fontSize = 12.sp)
+                            Box(Modifier.fillMaxWidth().heightIn(max = 140.dp).background(PsCanvas).padding(8.dp)) {
+                                Text(info.notes, color = PsText, fontSize = 12.sp, modifier = Modifier.verticalScroll(rememberScrollState()))
+                            }
+                        }
+                        if (info.msiUrl != null) {
+                            Text("L'app si chiuderà e partirà l'installazione.", color = PsDim, fontSize = 11.sp)
+                        }
+                    }
+                    UpdateStatus.DOWNLOADING -> {
+                        Text("Download in corso… ${(Updater.progress * 100).toInt()}%", color = PsText, fontSize = 13.sp)
+                        LinearProgressIndicator(
+                            progress = { Updater.progress }, modifier = Modifier.fillMaxWidth(),
+                            color = PsAccent, trackColor = Color(0xFF1F1F1F)
+                        )
+                    }
+                    UpdateStatus.READY -> Text(Updater.message, color = PsText, fontSize = 13.sp)
+                    UpdateStatus.ERROR -> {
+                        Text("Operazione non riuscita", color = PsError, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        Text(Updater.error ?: "", color = PsDim, fontSize = 12.sp)
+                    }
+                }
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (status == UpdateStatus.AVAILABLE && info != null) {
+                    PsButton("Più tardi") { Updater.dialogOpen = false }
+                    PsButton("Scarica e installa", primary = true) {
+                        scope.launch { Updater.downloadAndInstall { st.exitApp() } }
+                    }
+                } else if (status == UpdateStatus.ERROR) {
+                    PsButton("Pagina delle versioni") { Updater.openReleasesPage() }
+                    PsButton("Riprova", primary = true) { scope.launch { Updater.check(true) } }
+                    PsButton("Chiudi") { Updater.dialogOpen = false }
+                } else if (status != UpdateStatus.DOWNLOADING) {
+                    PsButton("Chiudi", primary = status != UpdateStatus.CHECKING) { Updater.dialogOpen = false }
+                }
             }
         }
     }

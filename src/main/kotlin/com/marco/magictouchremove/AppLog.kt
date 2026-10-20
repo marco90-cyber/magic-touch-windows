@@ -8,8 +8,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-const val APP_VERSION = "1.0"
-
 /**
  * Registro eventi: tiene gli ultimi messaggi in memoria (per la finestra «Registro eventi»),
  * li scrive anche in %LOCALAPPDATA%\MagicTouchRemove\log.txt e si può esportare in un file .txt.

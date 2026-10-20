@@ -72,13 +72,8 @@ fun formatSize(bytes: Long): String =
 
 /** Scarica e tiene traccia dei modelli IA in %LOCALAPPDATA%\MagicTouchRemove\models. */
 object ModelManager {
-    val dir: File = run {
-        val local = System.getenv("LOCALAPPDATA")
-        val base = if (!local.isNullOrBlank()) File(local) else File(System.getProperty("user.home"), ".local/share")
-        File(base, "MagicTouchRemove")
-    }
+    val dir: File get() = appDataDir
     val modelsDir = File(dir, "models")
-    private val prefsFile = File(dir, "settings.properties")
 
     /** Avanzamento 0..1 dei download in corso, per id del modello. */
     val progress = mutableStateMapOf<String, Float>()
@@ -91,13 +86,8 @@ object ModelManager {
 
     init {
         modelsDir.mkdirs()
-        try {
-            val p = Properties()
-            if (prefsFile.isFile) prefsFile.inputStream().use { p.load(it) }
-            p.getProperty("inpaint")?.let { activeInpaint = it }
-            p.getProperty("select")?.let { activeSelect = it }
-        } catch (_: Exception) {
-        }
+        activeInpaint = Prefs.get("inpaint", "lama")
+        activeSelect = Prefs.get("select", "mobilesam")
     }
 
     fun file(f: ModelFile) = File(modelsDir, f.name)
@@ -112,14 +102,8 @@ object ModelManager {
 
     fun setActive(opt: ModelOption) {
         if (opt.kind == Kind.INPAINT) activeInpaint = opt.id else activeSelect = opt.id
-        try {
-            val p = Properties()
-            p.setProperty("inpaint", activeInpaint)
-            p.setProperty("select", activeSelect)
-            dir.mkdirs()
-            prefsFile.outputStream().use { p.store(it, "Magic Touch Remove") }
-        } catch (_: Exception) {
-        }
+        Prefs.set("inpaint", activeInpaint)
+        Prefs.set("select", activeSelect)
     }
 
     /** Il modello da usare: quello scelto se installato, altrimenti il primo installato dello stesso tipo. */
