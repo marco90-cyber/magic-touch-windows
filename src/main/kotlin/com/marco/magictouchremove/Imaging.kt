@@ -131,8 +131,32 @@ private fun applyOrientation(src: BufferedImage, o: Int): BufferedImage {
 
 /** Apre un'immagine (JPEG, PNG, BMP…) rispettando l'orientamento EXIF. Ritorna null se non leggibile. */
 fun loadImage(file: File): BufferedImage? {
-    val raw = ImageIO.read(file) ?: return null
+    val raw = try {
+        ImageIO.read(file)
+    } catch (e: Throwable) {
+        if (e is OutOfMemoryError) throw e
+        AppLog.w("Lettura standard non riuscita (${e.javaClass.simpleName}: ${e.message}), provo il decodificatore alternativo")
+        null
+    } ?: readWithToolkit(file) ?: return null
     val argb = if (raw.type == BufferedImage.TYPE_INT_ARGB) raw else raw.copyImage()
     val isJpeg = file.extension.lowercase().let { it == "jpg" || it == "jpeg" }
     return if (isJpeg) applyOrientation(argb, exifOrientation(file)) else argb
+}
+
+
+/** Decodificatore alternativo (AWT): accetta anche JPEG con profili colore o formati che ImageIO rifiuta. */
+private fun readWithToolkit(file: File): BufferedImage? {
+    val img = java.awt.Toolkit.getDefaultToolkit().createImage(file.absolutePath)
+    val tracker = java.awt.MediaTracker(java.awt.Canvas())
+    tracker.addImage(img, 0)
+    tracker.waitForID(0)
+    val w = img.getWidth(null)
+    val h = img.getHeight(null)
+    if (w <= 0 || h <= 0 || tracker.isErrorAny) return null
+    val out = BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB)
+    val g = out.createGraphics()
+    g.drawImage(img, 0, 0, null)
+    g.dispose()
+    img.flush()
+    return out
 }

@@ -38,6 +38,8 @@ object SysInfo {
                 loaded = true
                 AppLog.i("Informazioni di sistema raccolte. Schede video: " + gpus.ifEmpty { "nessuna rilevata" })
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Throwable) {
             AppLog.e("Raccolta delle informazioni di sistema non riuscita", e)
         } finally {

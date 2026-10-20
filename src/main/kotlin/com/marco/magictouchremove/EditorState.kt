@@ -132,12 +132,14 @@ class EditorState(private val scope: CoroutineScope) {
         if (busy) return
         busy = true; busyText = "Apertura di ${file.name}…"
         scope.launch(Dispatchers.Default) {
-            val img = try { loadImage(file) } catch (e: Throwable) { null }
+            var openErr: Throwable? = null
+            val img = try { loadImage(file) } catch (e: Throwable) { openErr = e; null }
             withContext(Dispatchers.Main) {
                 busy = false
                 if (img == null) {
                     message = "Impossibile aprire «${file.name}»"
-                    AppLog.e("Apertura non riuscita: ${file.path}")
+                    if (openErr != null) AppLog.e("Apertura non riuscita: ${file.path}", openErr)
+                    else AppLog.e("Apertura non riuscita: ${file.path} (formato non riconosciuto, ${file.length() / 1024} KB)")
                 } else {
                     AppLog.i("Aperta «${file.name}» (${img.width}×${img.height} px)")
                     image = img
