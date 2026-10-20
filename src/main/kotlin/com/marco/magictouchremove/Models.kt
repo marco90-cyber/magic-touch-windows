@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.awt.Desktop
 import java.io.File
 import java.net.URI
 import java.net.http.HttpClient
@@ -169,7 +170,37 @@ object ModelManager {
         }
     }
 
+    /** Apre la cartella dei modelli in Esplora risorse. */
+    fun openFolder() {
+        try {
+            modelsDir.mkdirs()
+            Desktop.getDesktop().open(modelsDir)
+        } catch (e: Throwable) {
+            AppLog.w("Impossibile aprire la cartella dei modelli: ${e.message}")
+        }
+    }
+
+    fun folderBytes(): Long = try {
+        modelsDir.listFiles()?.filter { it.isFile }?.sumOf { it.length() } ?: 0L
+    } catch (_: Throwable) {
+        0L
+    }
+
+    /** Elimina tutti i modelli scaricati (e i download interrotti). */
+    fun deleteAll() {
+        Engines.releaseAll()   // Windows non lascia cancellare un file che è ancora aperto
+        var n = 0L
+        var failed = 0
+        modelsDir.listFiles()?.forEach { f ->
+            val size = f.length()
+            if (f.isFile && f.delete()) n += size else if (f.isFile) failed++
+        }
+        revision++
+        AppLog.i("Eliminati i modelli scaricati (${formatBytes(n)})" + if (failed > 0) ", $failed file non eliminati" else "")
+    }
+
     fun delete(opt: ModelOption) {
+        Engines.releaseAll()
         opt.files.forEach { file(it).delete() }
         revision++
         AppLog.i("Modello «${opt.title}» eliminato")
@@ -178,6 +209,12 @@ object ModelManager {
 
 /** Mantiene in memoria il motore del modello attivo. */
 object Engines {
+    @Synchronized
+    fun releaseAll() {
+        inpainter?.close(); inpainter = null; inpainterId = null
+        segmenter?.close(); segmenter = null; segmenterId = null
+    }
+
     private var inpainter: Inpainter? = null
     private var inpainterId: String? = null
     private var segmenter: Segmenter? = null

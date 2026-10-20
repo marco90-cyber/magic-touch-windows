@@ -1,7 +1,18 @@
 package com.marco.magictouchremove
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.toComposeImageBitmap
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.IntSize
+import java.io.ByteArrayInputStream
+import javax.imageio.ImageIO
 import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.foundation.TooltipArea
@@ -520,12 +531,33 @@ private fun Panel(title: String, modifier: Modifier, content: @Composable () -> 
 @Composable
 private fun ModelsPanel() {
     val scope = rememberCoroutineScope()
+    var confirmDelete by remember { mutableStateOf(false) }
+    val used = remember(ModelManager.revision) { ModelManager.folderBytes() }
     Column(Modifier.verticalScroll(rememberScrollState()).padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         ModelGroup("Rimozione oggetti", Kind.INPAINT, scope)
         ModelGroup("Selezione automatica", Kind.SELECT, scope)
-        Text(
-            "I modelli vengono scaricati una volta sola in ${ModelManager.dir.path}",
-            color = PsDim, fontSize = 11.sp
+        Text("Spazio usato dai modelli: ${formatBytes(used)}", color = PsDim, fontSize = 11.sp)
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            PsButton("Apri cartella") { ModelManager.openFolder() }
+            PsButton("Elimina modelli", enabled = used > 0) { confirmDelete = true }
+        }
+    }
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            containerColor = PsPanel,
+            title = { Text("Eliminare i modelli?", color = PsText, fontSize = 15.sp) },
+            text = {
+                Text(
+                    "Verranno cancellati tutti i modelli IA scaricati (${formatBytes(used)}). " +
+                        "Per usare di nuovo l'app dovrai scaricarli un'altra volta.",
+                    color = PsDim, fontSize = 12.sp
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { confirmDelete = false; ModelManager.deleteAll() }) { Text("Elimina", color = PsError) }
+            },
+            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Annulla", color = PsText) } }
         )
     }
 }
@@ -689,7 +721,10 @@ private fun LogDialog(st: EditorState) {
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text("Registro eventi", color = PsText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                Text("${entries.size} righe", color = PsDim, fontSize = 12.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("${entries.size} righe", color = PsDim, fontSize = 12.sp)
+                    PsButton("Chiudi") { st.showLog = false }
+                }
             }
             SelectionContainer(Modifier.weight(1f).fillMaxWidth().background(PsCanvas)) {
                 LazyColumn(state = listState, modifier = Modifier.fillMaxSize().padding(8.dp)) {
@@ -747,54 +782,111 @@ private fun ExportDialog(st: EditorState) {
     }
     var quality by remember { mutableIntStateOf((Prefs.get("exportQuality", "95").toIntOrNull() ?: 95).coerceIn(80, 100)) }
     var estimate by remember { mutableStateOf<String?>(null) }
+    var preview by remember { mutableStateOf<ImageBitmap?>(null) }
+    var fitPreview by remember { mutableStateOf(true) }
     val (w, h) = scaledSize(img, scale)
 
-    // stima del peso del file (la qualità conta solo per il JPEG)
+    // anteprima e peso stimato: si ricalcolano a ogni cambio di impostazioni (la qualità conta solo per il JPEG)
     LaunchedEffect(format, scale, if (format.lossy) quality else 0, img) {
         estimate = null
         delay(300)
-        val bytes = withContext(Dispatchers.Default) {
-            runCatching { encodeImage(img, ExportOptions(format, quality, scale)).size.toLong() }.getOrNull()
+        val result = withContext(Dispatchers.Default) {
+            runCatching {
+                val bytes = encodeImage(img, ExportOptions(format, quality, scale))
+                bytes.size.toLong() to ImageIO.read(ByteArrayInputStream(bytes))
+            }.getOrNull()
         }
-        estimate = bytes?.let { formatBytes(it) } ?: "non disponibile"
+        estimate = result?.let { formatBytes(it.first) } ?: "non disponibile"
+        preview = result?.second?.toComposeImageBitmap()
     }
 
     Dialog(onDismissRequest = { st.showExport = false }) {
         Column(
-            Modifier.width(560.dp).clip(RoundedCornerShape(6.dp)).background(PsPanel)
+            Modifier.width(980.dp).clip(RoundedCornerShape(6.dp)).background(PsPanel)
                 .border(1.dp, PsBorder, RoundedCornerShape(6.dp))
         ) {
-            Text(
-                "Salva con nome", color = PsText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.fillMaxWidth().background(PsPanelHeader).padding(horizontal = 14.dp, vertical = 9.dp)
-            )
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Formato", color = PsDim, fontSize = 12.sp)
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        for (f in ExportFormat.values()) PsButton(f.label, primary = f == format) { format = f }
+            Row(
+                Modifier.fillMaxWidth().background(PsPanelHeader).padding(horizontal = 14.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Salva con nome", color = PsText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                PsButton("Chiudi") { st.showExport = false }
+            }
+            Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                // ---- impostazioni
+                Column(Modifier.width(420.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("Formato", color = PsDim, fontSize = 12.sp)
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            for (f in ExportFormat.values()) PsButton(f.label, primary = f == format) { format = f }
+                        }
+                        Text(format.hint, color = PsDim, fontSize = 11.sp)
                     }
-                    Text(format.hint, color = PsDim, fontSize = 11.sp)
-                }
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Risoluzione", color = PsDim, fontSize = 12.sp)
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        for (s in EXPORT_SCALES) PsButton(scaleLabel(s), primary = s == scale) { scale = s }
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("Risoluzione", color = PsDim, fontSize = 12.sp)
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            for (sc in EXPORT_SCALES) PsButton(scaleLabel(sc), primary = sc == scale) { scale = sc }
+                        }
+                        Text("$w × $h px", color = PsText, fontSize = 12.sp)
                     }
-                    Text("$w × $h px", color = PsText, fontSize = 12.sp)
-                }
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Qualità", color = PsDim, fontSize = 12.sp)
-                    if (format.lossy) {
-                        PsSlider("", quality.toFloat(), 80f, 100f, "$quality%", { quality = it.roundToInt().coerceIn(80, 100) }, trackWidth = 300.dp)
-                    } else {
-                        Text("Non serve: ${format.label} non perde qualità.", color = PsDim, fontSize = 12.sp)
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("Qualità", color = PsDim, fontSize = 12.sp)
+                        if (format.lossy) {
+                            PsSlider("", quality.toFloat(), 80f, 100f, "$quality%", { quality = it.roundToInt().coerceIn(80, 100) }, trackWidth = 290.dp)
+                        } else {
+                            Text("Non serve: ${format.label} non perde qualità.", color = PsDim, fontSize = 12.sp)
+                        }
                     }
+                    Text("Peso stimato: " + (estimate ?: "calcolo in corso…"), color = PsText, fontSize = 12.sp)
                 }
-                Text(
-                    "Peso stimato: " + (estimate ?: "calcolo in corso…"),
-                    color = PsText, fontSize = 12.sp
-                )
+
+                // ---- anteprima di come verrà salvata l'immagine
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Anteprima", color = PsDim, fontSize = 12.sp)
+                        Spacer(Modifier.weight(1f))
+                        PsButton("Intera", primary = fitPreview) { fitPreview = true }
+                        PsButton("100%", primary = !fitPreview) { fitPreview = false }
+                    }
+                    Box(Modifier.fillMaxWidth().height(380.dp).background(PsCanvas).border(1.dp, PsBorder)) {
+                        val bmp = preview
+                        if (bmp == null) {
+                            Text("Preparazione dell'anteprima…", color = PsDim, fontSize = 12.sp, modifier = Modifier.align(Alignment.Center))
+                        } else {
+                            Canvas(Modifier.fillMaxSize()) {
+                                if (fitPreview) {
+                                    val sc = minOf(size.width / bmp.width, size.height / bmp.height, 1f)
+                                    val dw = maxOf(1, (bmp.width * sc).roundToInt())
+                                    val dh = maxOf(1, (bmp.height * sc).roundToInt())
+                                    drawImage(
+                                        image = bmp, srcOffset = IntOffset.Zero, srcSize = IntSize(bmp.width, bmp.height),
+                                        dstOffset = IntOffset(((size.width - dw) / 2).roundToInt(), ((size.height - dh) / 2).roundToInt()),
+                                        dstSize = IntSize(dw, dh), filterQuality = FilterQuality.Medium
+                                    )
+                                } else {
+                                    // 1 pixel dell'immagine = 1 pixel dello schermo: si vedono i dettagli e la compressione
+                                    val cw = minOf(bmp.width, size.width.toInt())
+                                    val ch = minOf(bmp.height, size.height.toInt())
+                                    drawImage(
+                                        image = bmp,
+                                        srcOffset = IntOffset((bmp.width - cw) / 2, (bmp.height - ch) / 2), srcSize = IntSize(cw, ch),
+                                        dstOffset = IntOffset(((size.width - cw) / 2).roundToInt(), ((size.height - ch) / 2).roundToInt()),
+                                        dstSize = IntSize(cw, ch), filterQuality = FilterQuality.None
+                                    )
+                                }
+                            }
+                        }
+                        if (estimate == null && bmp != null) {
+                            Text("aggiornamento…", color = PsAccent, fontSize = 11.sp, modifier = Modifier.align(Alignment.TopStart).padding(8.dp))
+                        }
+                    }
+                    Text(
+                        (if (fitPreview) "Intera" else "Dettaglio al 100% (centro)") + " · $w × $h px · " + format.label +
+                            (if (format.lossy) " $quality%" else ""),
+                        color = PsDim, fontSize = 11.sp
+                    )
+                }
             }
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
@@ -923,75 +1015,123 @@ private fun UpdateDialog(st: EditorState) {
 }
 
 // =========================================================================
-// Menu del tasto destro nella tela (cambia con lo strumento, come in Photoshop)
+// Menu del tasto destro nella tela: stesse funzioni della barra delle opzioni
 // =========================================================================
 
 @Composable
-private fun CtxItem(label: String, shortcut: String = "", enabled: Boolean = true, onClick: () -> Unit) {
-    DropdownMenuItem(
-        enabled = enabled,
-        onClick = onClick,
-        text = {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(label, fontSize = 12.sp, color = if (enabled) PsText else PsDim)
-                Text(shortcut, fontSize = 12.sp, color = PsDim)
-            }
-        },
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-        modifier = Modifier.height(28.dp)
-    )
+private fun MenuRow(label: String, shortcut: String = "", enabled: Boolean = true, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().height(28.dp)
+            .then(if (enabled) Modifier.clickable { onClick() } else Modifier)
+            .padding(horizontal = 12.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label, fontSize = 12.sp, color = if (enabled) PsText else PsDim)
+        Text(shortcut, fontSize = 12.sp, color = PsDim)
+    }
 }
 
 @Composable
-private fun CtxSeparator() {
+private fun MenuSeparator() {
     Box(Modifier.padding(vertical = 3.dp).fillMaxWidth().height(1.dp).background(PsBorder))
 }
 
+/** Pannello disegnato sopra la tela (non un popup, così non si chiude da solo). */
 @Composable
 private fun ContextMenu(st: EditorState) {
     val pos = st.ctxPos ?: return
-    Box(Modifier.offset { IntOffset(pos.x.roundToInt(), pos.y.roundToInt()) }) {
-        DropdownMenu(
-            expanded = true,
-            onDismissRequest = { st.ctxPos = null },
-            modifier = Modifier.background(PsPanel).widthIn(min = 250.dp)
-        ) {
-            val close = { st.ctxPos = null }
-            Text(st.tool.label.uppercase(), color = PsDim, fontSize = 10.sp, fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(start = 12.dp, top = 4.dp, bottom = 4.dp))
+    var size by remember { mutableStateOf(IntSize.Zero) }
+    val close = { st.ctxPos = null }
+
+    // un clic fuori dal pannello lo chiude
+    Box(
+        Modifier.fillMaxSize().pointerInput(Unit) {
+            awaitEachGesture {
+                awaitFirstDown(requireUnconsumed = false).consume()
+                st.ctxPos = null
+                waitForUpOrCancellation()
+            }
+        }
+    )
+
+    val x = pos.x.roundToInt().coerceIn(0, maxOf(0, st.viewWidth.roundToInt() - size.width))
+    val y = pos.y.roundToInt().coerceIn(0, maxOf(0, st.viewHeight.roundToInt() - size.height))
+    Column(
+        Modifier
+            .offset { IntOffset(x, y) }
+            .width(300.dp)
+            .onSizeChanged { size = it }
+            .clip(RoundedCornerShape(4.dp))
+            .background(PsPanel)
+            .border(1.dp, PsBorder, RoundedCornerShape(4.dp))
+            .pointerInput(Unit) { detectTapGestures { } }
+            .padding(vertical = 4.dp)
+    ) {
+        Text(
+            st.tool.label.uppercase(), color = PsDim, fontSize = 10.sp, fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(start = 12.dp, top = 4.dp, bottom = 6.dp)
+        )
+
+        // --- parte che cambia con lo strumento (come la barra in alto)
+        Column(Modifier.padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             when (st.tool) {
                 Tool.BRUSH, Tool.ERASER, Tool.RESTORE -> {
-                    Column(Modifier.padding(horizontal = 12.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        PsSlider("Dimensione", st.brushSize, 4f, 300f, "${st.brushSize.toInt()} px", { st.brushSize = it })
-                        PsSlider("Durezza", st.hardness, 0f, 1f, "${(st.hardness * 100).toInt()}%", { st.hardness = it })
-                    }
-                    CtxSeparator()
-                    CtxItem("Cancella con IA", "Invio", st.hasMask && !st.busy) { close(); st.remove() }
-                    CtxItem("Deseleziona", "Ctrl+D", st.hasMask) { close(); st.deselect() }
-                    CtxItem("Inverti selezione", "", true) { close(); st.invertSelection() }
+                    PsSlider("Dimensione", st.brushSize, 4f, 300f, "${st.brushSize.toInt()} px", { st.brushSize = it })
+                    PsSlider("Durezza", st.hardness, 0f, 1f, "${(st.hardness * 100).toInt()}%", { st.hardness = it })
                 }
-                Tool.SELECT, Tool.LASSO -> {
-                    CtxItem("Cancella con IA", "Invio", st.hasMask && !st.busy) { close(); st.remove() }
-                    CtxItem("Deseleziona", "Ctrl+D", st.hasMask) { close(); st.deselect() }
-                    CtxItem("Inverti selezione", "", true) { close(); st.invertSelection() }
-                    CtxSeparator()
-                    Column(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
-                        PsSlider("Espansione", st.expand, 0f, 15f, "${st.expand.toInt()} px", { st.expand = it })
+                Tool.SELECT -> Text("Clic su un oggetto, oppure trascina un riquadro", color = PsDim, fontSize = 11.sp)
+                Tool.LASSO -> Text("Disegna un contorno attorno all'oggetto", color = PsDim, fontSize = 11.sp)
+                Tool.HAND -> Text("Trascina per spostare · rotellina per lo zoom", color = PsDim, fontSize = 11.sp)
+                Tool.ZOOM -> {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        PsButton("Ingrandisci", primary = !st.zoomOut) { st.zoomOut = false }
+                        PsButton("Riduci", primary = st.zoomOut) { st.zoomOut = true }
                     }
-                }
-                Tool.HAND, Tool.ZOOM -> {
-                    CtxItem("Ingrandisci", "Ctrl++") { close(); st.zoomAt(1.25f) }
-                    CtxItem("Riduci", "Ctrl+-") { close(); st.zoomAt(0.8f) }
-                    CtxItem("Adatta alla finestra", "Ctrl+0") { close(); st.fit() }
-                    CtxItem("100%", "Ctrl+1") { close(); st.actualSize() }
-                    CtxItem("200%", "") { close(); st.zoomTo(2f) }
-                    CtxItem("50%", "") { close(); st.zoomTo(0.5f) }
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        PsButton("Adatta schermo") { close(); st.fit() }
+                        PsButton("100%") { close(); st.actualSize() }
+                    }
                 }
             }
-            CtxSeparator()
-            CtxItem("Annulla", "Ctrl+Z", st.canUndo) { close(); st.undo() }
-            CtxItem("Ripeti", "Ctrl+Maiusc+Z", st.canRedo) { close(); st.redo() }
+            // --- parte uguale per tutti gli strumenti: espansione, AUTO e pulsanti
+            PsSlider("Espansione", st.expand, 0f, 15f, "${st.expand.toInt()} px", { st.expand = it })
+            Row(
+                Modifier.clip(RoundedCornerShape(3.dp)).clickable { st.auto = !st.auto }.padding(vertical = 3.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    Modifier.size(14.dp).clip(RoundedCornerShape(2.dp))
+                        .background(if (st.auto) PsAccent else Color(0xFF1F1F1F)).border(1.dp, PsBorder),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (st.auto) Icon(Icons.Filled.Check, null, tint = Color.White, modifier = Modifier.size(11.dp))
+                }
+                Spacer(Modifier.width(6.dp))
+                Text("AUTO (cancella appena finisci di selezionare)", color = PsText, fontSize = 12.sp)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                PsButton("Confronta", modifier = Modifier.pointerInput(Unit) {
+                    detectTapGestures(onPress = {
+                        st.comparing = true
+                        tryAwaitRelease()
+                        st.comparing = false
+                    })
+                })
+                PsButton("Deseleziona", enabled = st.hasMask) { close(); st.deselect() }
+                PsButton("Cancella", primary = true, enabled = st.hasMask && !st.busy) { close(); st.remove() }
+            }
         }
+
+        MenuSeparator()
+        MenuRow("Seleziona tutto", "Ctrl+A", !st.busy) { close(); st.selectAll() }
+        MenuRow("Inverti selezione", "", !st.busy) { close(); st.invertSelection() }
+        MenuSeparator()
+        MenuRow("Annulla", "Ctrl+Z", st.canUndo) { close(); st.undo() }
+        MenuRow("Ripeti", "Ctrl+Maiusc+Z", st.canRedo) { close(); st.redo() }
+        MenuSeparator()
+        MenuRow("Adatta alla finestra", "Ctrl+0") { close(); st.fit() }
+        MenuRow("100%", "Ctrl+1") { close(); st.actualSize() }
     }
 }
 
@@ -1013,7 +1153,10 @@ private fun SysInfoDialog(st: EditorState) {
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text("Informazioni sistema", color = PsText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                if (SysInfo.loading) Text("Rilevamento schede video in corso…", color = PsAccent, fontSize = 12.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (SysInfo.loading) Text("Rilevamento schede video in corso…", color = PsAccent, fontSize = 12.sp)
+                    PsButton("Chiudi") { st.showSysInfo = false }
+                }
             }
             if (SysInfo.loading) LinearProgressIndicator(Modifier.fillMaxWidth(), color = PsAccent, trackColor = Color(0xFF1F1F1F))
             SelectionContainer(Modifier.weight(1f).fillMaxWidth().background(PsCanvas)) {

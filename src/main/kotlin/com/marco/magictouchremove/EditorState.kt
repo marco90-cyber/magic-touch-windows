@@ -86,6 +86,8 @@ class EditorState(private val scope: CoroutineScope) {
     private var viewH = 0f
     private var needFit = false
     var hover by mutableStateOf<Offset?>(null)
+    val viewWidth: Float get() = viewW
+    val viewHeight: Float get() = viewH
 
     // ---- gesti in corso ----
     val lassoPts = mutableStateListOf<Offset>()   // coordinate immagine
@@ -192,6 +194,14 @@ class EditorState(private val scope: CoroutineScope) {
         commit("Inverti selezione")
     }
 
+    fun selectAll() {
+        if (image == null || busy) return
+        mask.fill(255.toByte())
+        hasMask = true
+        version++
+        commit("Seleziona tutto")
+    }
+
     fun deselect() {
         if (image == null || !hasMask) return
         mask.fill(0)
@@ -278,6 +288,7 @@ class EditorState(private val scope: CoroutineScope) {
             for (i in 1..n) stamp(t, lastX + dx * i / n, lastY + dy * i / n, r)
         }
         lastX = p.x; lastY = p.y
+        if (t == Tool.BRUSH) hasMask = true   // la maschera si vede già durante il primo tratto
         version++
     }
 

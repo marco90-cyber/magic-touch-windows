@@ -94,6 +94,7 @@ fun main() = application {
                 ctrl && e.key == Key.Y -> { st.redo(); true }
                 ctrl && e.key == Key.Z -> { st.undo(); true }
                 ctrl && e.key == Key.D -> { st.deselect(); true }
+                ctrl && e.key == Key.A -> { st.selectAll(); true }
                 ctrl && e.key == Key.L -> { st.showLog = !st.showLog; true }
                 ctrl && e.key == Key.Zero -> { st.fit(); true }
                 ctrl && e.key == Key.One -> { st.actualSize(); true }
