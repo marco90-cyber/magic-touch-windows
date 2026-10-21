@@ -435,6 +435,7 @@ class EditorState(private val scope: CoroutineScope) {
     private fun runSelect(point: PointF?, box: RectF?) {
         val img = image ?: return
         busy = true; busyText = "Selezione automatica…"
+        val gen = startJob()
         scope.launch(Dispatchers.Default) {
             val t0 = System.currentTimeMillis()
             var r = runCatching { Engines.segmenter().select(img, point, box) }
@@ -448,7 +449,8 @@ class EditorState(private val scope: CoroutineScope) {
             val sel: BooleanArray? = r.getOrNull()
             val err: String? = r.exceptionOrNull()?.let { it.message ?: it.toString() }
             withContext(Dispatchers.Main) {
-                busy = false
+                if (gen != jobGen) return@withContext
+                busy = false; cancellable = false
                 if (err != null) {
                     message = err
                 } else if (sel == null || image !== img) {
@@ -473,6 +475,7 @@ class EditorState(private val scope: CoroutineScope) {
         if (busy) return
         if (!hasMask) { message = "Seleziona prima l'oggetto da rimuovere"; return }
         busy = true; busyText = "Rimozione con l'IA…"
+        val gen = startJob()
         val m = mask.copyOf()
         val ex = expand.toInt()
         val feather = ((1f - hardness) * 8f).toInt()
@@ -495,7 +498,8 @@ class EditorState(private val scope: CoroutineScope) {
             val res: BufferedImage? = r.getOrNull()
             val err: String? = r.exceptionOrNull()?.let { it.message ?: it.toString() }
             withContext(Dispatchers.Main) {
-                busy = false
+                if (gen != jobGen) return@withContext
+                busy = false; cancellable = false
                 if (err != null) {
                     message = err
                 } else if (res == null || image !== img) {
@@ -518,24 +522,41 @@ class EditorState(private val scope: CoroutineScope) {
     var transparent by mutableStateOf(false)   // l'immagine ha zone trasparenti (si disegna la scacchiera)
     var showGenerate by mutableStateOf(false)  // finestra «Genera con IA»
 
+    @Volatile private var jobGen = 0
+    var cancellable by mutableStateOf(false); private set
+
+    private fun startJob(): Int { cancellable = true; return ++jobGen }
+
+    /** Annulla l'operazione IA in corso: l'interfaccia si libera subito e il risultato viene scartato. */
+    fun cancelJob() {
+        if (!cancellable) return
+        jobGen++
+        cancellable = false
+        busy = false
+        message = "Operazione annullata"
+        AppLog.i("Operazione IA annullata dall'utente")
+    }
+
     private fun progressText(s: String) { scope.launch(Dispatchers.Main) { busyText = s } }
 
     /** Esegue [job] in background e, se produce un'immagine, la applica come nuovo passo della cronologia. */
     private fun imageJob(
         busyMsg: String, doneLabel: String, resetMask: Boolean, newSize: Boolean = false, alpha: Boolean = false,
-        job: suspend (BufferedImage) -> BufferedImage?,
+        job: suspend (BufferedImage, () -> Boolean) -> BufferedImage?,
     ) {
         val img = image ?: return
         if (busy) return
         busy = true; busyText = busyMsg
+        val gen = startJob()
         scope.launch(Dispatchers.Default) {
             val t0 = System.currentTimeMillis()
-            var r = runCatching { job(img) }
-            if (r.isFailure && Gpu.active && r.exceptionOrNull() !is OutOfMemoryError) {
+            val cancelled = { gen != jobGen }
+            var r = runCatching { job(img, cancelled) }
+            if (r.isFailure && !cancelled() && Gpu.active && r.exceptionOrNull() !is OutOfMemoryError) {
                 Gpu.fallbackToCpu()
-                r = runCatching { job(img) }
+                r = runCatching { job(img, cancelled) }
             }
-            r.exceptionOrNull()?.let {
+            if (!cancelled()) r.exceptionOrNull()?.let {
                 AppLog.e("$doneLabel non riuscito", it)
                 if (it is OutOfMemoryError) withContext(Dispatchers.Main) { dropHistory() }
             }
@@ -543,7 +564,8 @@ class EditorState(private val scope: CoroutineScope) {
             val res = r.getOrNull()
             val err = r.exceptionOrNull()?.let { it.message ?: it.toString() }
             withContext(Dispatchers.Main) {
-                busy = false
+                if (gen != jobGen) return@withContext
+                busy = false; cancellable = false
                 if (err != null) {
                     message = err
                 } else if (res == null || image !== img) {
@@ -568,19 +590,20 @@ class EditorState(private val scope: CoroutineScope) {
         val m = mask.copyOf()
         val ex = expand.toInt()
         val feather = ((1f - hardness) * 8f).toInt()
-        imageJob("Generazione con l'IA…", "Generazione IA", resetMask = true) { img ->
+        imageJob("Generazione con l'IA…", "Generazione IA", resetMask = true) { img, cancelled ->
             val g = Engines.generator()
             g.prompt = prompt; g.steps = steps; g.guidance = guidance
             g.onProgress = { progressText(it) }
+            g.isCancelled = cancelled
             g.inpaint(img, m, ex, feather)
         }
     }
 
-    fun upscale() = imageJob("Ingrandimento con l'IA…", "Ingrandimento IA", resetMask = true, newSize = true) { img ->
-        Engines.upscaler().upscale(img) { progressText("Ingrandimento… ${(it * 100).toInt()}%") }
+    fun upscale() = imageJob("Ingrandimento con l'IA…", "Ingrandimento IA", resetMask = true, newSize = true) { img, cancelled ->
+        Engines.upscaler().upscale(img, cancelled) { progressText("Ingrandimento… ${(it * 100).toInt()}%") }
     }
 
-    fun removeBackground() = imageJob("Rimozione dello sfondo…", "Rimozione sfondo", resetMask = true, alpha = true) { img ->
+    fun removeBackground() = imageJob("Rimozione dello sfondo…", "Rimozione sfondo", resetMask = true, alpha = true) { img, _ ->
         Engines.bgRemover().remove(img)
     }
 

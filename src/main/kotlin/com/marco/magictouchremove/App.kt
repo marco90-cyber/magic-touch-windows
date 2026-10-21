@@ -192,7 +192,7 @@ fun App(st: EditorState) {
                     CanvasView(st, Modifier.fillMaxSize())
                     ContextMenu(st)
                     if (st.image == null) EmptyState(st)
-                    if (st.busy) BusyOverlay(st.busyText)
+                    if (st.busy) BusyOverlay(st.busyText, if (st.cancellable) ({ st.cancelJob() }) else null)
                 }
             }
             RightPanels(st)
@@ -507,7 +507,7 @@ private fun EmptyState(st: EditorState) {
 }
 
 @Composable
-private fun BusyOverlay(text: String) {
+private fun BusyOverlay(text: String, onCancel: (() -> Unit)? = null) {
     Box(
         Modifier.fillMaxSize().background(Color(0x66000000)).pointerInput(Unit) { detectTapGestures { } },
         contentAlignment = Alignment.Center
@@ -523,6 +523,10 @@ private fun BusyOverlay(text: String) {
                 color = PsAccent,
                 trackColor = Color(0xFF1F1F1F)
             )
+            if (onCancel != null) {
+                Spacer(Modifier.height(14.dp))
+                PsButton("Annulla  (Esc)") { onCancel() }
+            }
         }
     }
 }

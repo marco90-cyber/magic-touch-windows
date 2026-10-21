@@ -74,6 +74,8 @@ class SdInpainter(private val dir: File) : Inpainter() {
     var steps: Int = 20
     var guidance: Float = 7.5f
     var onProgress: ((String) -> Unit)? = null
+    var isCancelled: () -> Boolean = { false }
+    private fun checkCancel() { if (isCancelled()) throw java.util.concurrent.CancellationException("annullato") }
 
     private val tokenizer = ClipTokenizer(File(dir, "tokenizer/vocab.json"), File(dir, "tokenizer/merges.txt"))
     private val unet: OrtSession by lazy { Gpu.session(env, File(dir, "unet/model.onnx").absolutePath) }
@@ -188,6 +190,7 @@ class SdInpainter(private val dir: File) : Inpainter() {
 
         for (i in 0 until stepsN) {
             val t = (stepsN - 1 - i) * stride + 1
+            checkCancel()
             onProgress?.invoke("Generazione: passo ${i + 1} di $stepsN")
             val sample = FloatArray(9 * lp)
             System.arraycopy(x, 0, sample, 0, 4 * lp)

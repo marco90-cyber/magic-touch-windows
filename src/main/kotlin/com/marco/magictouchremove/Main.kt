@@ -91,6 +91,7 @@ fun main() = application {
             if (e.type != KeyEventType.KeyDown) return@Window false
             val ctrl = e.isCtrlPressed
             when {
+                e.key == Key.Escape && st.cancellable -> { st.cancelJob(); true }
                 ctrl && e.key == Key.O -> { st.openDialog(); true }
                 ctrl && e.key == Key.S -> { st.saveDialog(); true }
                 ctrl && e.key == Key.W -> { st.close(); true }

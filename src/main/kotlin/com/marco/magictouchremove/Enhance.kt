@@ -20,7 +20,7 @@ class Upscaler(path: String) {
     private val fixedW = (if (nchw) shape[3] else shape[2]).toInt()
 
     /** @return immagine ingrandita; [progress] riceve 0..1. */
-    fun upscale(src: BufferedImage, progress: (Float) -> Unit): BufferedImage {
+    fun upscale(src: BufferedImage, isCancelled: () -> Boolean, progress: (Float) -> Unit): BufferedImage {
         val w = src.width
         val h = src.height
         val tileH = if (fixedH > 0) fixedH else 128
@@ -38,6 +38,7 @@ class Upscaler(path: String) {
         val tilesY = (h + stepH - 1) / stepH
         var done = 0
         for (ty in 0 until tilesY) for (tx in 0 until tilesX) {
+            if (isCancelled()) throw java.util.concurrent.CancellationException("annullato")
             val x0 = tx * stepW
             val y0 = ty * stepH
             val inp = FloatArray(3 * tileW * tileH)
