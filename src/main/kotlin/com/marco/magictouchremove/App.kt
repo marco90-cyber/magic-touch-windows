@@ -1142,7 +1142,7 @@ private fun UpdateDialog(st: EditorState) {
                     UpdateStatus.AVAILABLE -> if (info != null) {
                         Text("Disponibile la versione ${info.name}", color = PsText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                         Text(
-                            (if (info.msiUrl != null) "Installer" else "Zip portatile") + " · " + formatBytes(info.size),
+                            "Aggiornamento dei file · " + formatBytes(info.size),
                             color = PsDim, fontSize = 12.sp
                         )
                         if (info.notes.isNotEmpty()) {
@@ -1151,9 +1151,10 @@ private fun UpdateDialog(st: EditorState) {
                                 Text(info.notes, color = PsText, fontSize = 12.sp, modifier = Modifier.verticalScroll(rememberScrollState()))
                             }
                         }
-                        if (info.msiUrl != null) {
-                            Text("L'app si chiuderà e partirà l'installazione.", color = PsDim, fontSize = 11.sp)
-                        }
+                        Text(
+                            "Si aggiornano solo i file del programma: modelli e impostazioni restano. L'app si chiude e si riapre da sola.",
+                            color = PsDim, fontSize = 11.sp
+                        )
                     }
                     UpdateStatus.DOWNLOADING -> {
                         Text("Download in corso… ${(Updater.progress * 100).toInt()}%", color = PsText, fontSize = 13.sp)

@@ -46,6 +46,7 @@ fun main() = application {
         }
         AppLog.i("Avvio di Magic Touch Remove $APP_VERSION · ${System.getProperty("os.name")} ${System.getProperty("os.version")} · Java ${System.getProperty("java.version")}")
         AppLog.i("Modelli installati: " + (ALL_OPTIONS.filter { ModelManager.isInstalled(it) }.joinToString(", ") { it.title }.ifEmpty { "nessuno" }))
+        Updater.reportLastUpdate()
         EditorState(scope).also { stRef = it }
     }
     remember { st.exitApp = ::exitApplication }

@@ -3,11 +3,29 @@ package com.marco.magictouchremove
 import java.io.File
 import java.util.Properties
 
-/** Cartella dei dati dell'app: %LOCALAPPDATA%\MagicTouchRemove (modelli, registro, impostazioni, aggiornamenti). */
+/**
+ * Cartella dei dati dell'app: %LOCALAPPDATA%\MagicTouchRemoveData (modelli, registro, impostazioni, aggiornamenti).
+ * È separata dalla cartella del programma, così disinstallare o aggiornare non cancella i modelli.
+ */
 val appDataDir: File by lazy {
     val local = System.getenv("LOCALAPPDATA")
     val base = if (!local.isNullOrBlank()) File(local) else File(System.getProperty("user.home"), ".local/share")
-    File(base, "MagicTouchRemove")
+    val dir = File(base, "MagicTouchRemoveData")
+    dir.mkdirs()
+    // le versioni precedenti usavano la cartella del programma: si spostano modelli e impostazioni
+    val old = File(base, "MagicTouchRemove")
+    try {
+        val oldModels = File(old, "models")
+        if (oldModels.isDirectory && !File(dir, "models").exists()) {
+            java.nio.file.Files.move(oldModels.toPath(), File(dir, "models").toPath())
+        }
+        for (n in listOf("settings.properties", "log.txt")) {
+            val f = File(old, n)
+            if (f.isFile && !File(dir, n).exists()) java.nio.file.Files.move(f.toPath(), File(dir, n).toPath())
+        }
+    } catch (_: Exception) {
+    }
+    dir
 }
 
 /** Numero di build (quello della release su GitHub), scritto nel file version.properties durante la compilazione. */

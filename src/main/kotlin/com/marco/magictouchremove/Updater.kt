@@ -27,7 +27,7 @@ class UpdateInfo(
     val zipSize: Long,
 ) {
     val name: String get() = "1.$build"
-    val size: Long get() = if (msiUrl != null) msiSize else zipSize
+    val size: Long get() = zipSize
 }
 
 enum class UpdateStatus { IDLE, CHECKING, UP_TO_DATE, AVAILABLE, DOWNLOADING, READY, ERROR }
@@ -94,7 +94,7 @@ object Updater {
                         }
                         val notes = (root["body"] as? String).orEmpty().trim()
                         if (build > BuildInfo.build) {
-                            if (msi == null && zip == null) {
+                            if (zip == null) {
                                 // release appena creata e file ancora in caricamento: riprova al prossimo controllo
                                 info = null
                                 status = UpdateStatus.UP_TO_DATE
@@ -122,13 +122,29 @@ object Updater {
         }
     }
 
-    /** Scarica l'aggiornamento e, se è un installer .msi, lo avvia e chiude l'app. */
+    /** Cartella del programma (quella dell'eseguibile), se l'app gira da un pacchetto e non dallo sviluppo. */
+    private fun appRoot(): File? = try {
+        val cmd = ProcessHandle.current().info().command().orElse(null)
+        val dir = cmd?.let { File(it).parentFile }
+        if (dir != null && File(dir, "app").isDirectory && cmd.endsWith(".exe", true) && !cmd.endsWith("java.exe", true) && !cmd.endsWith("javaw.exe", true)) dir else null
+    } catch (_: Throwable) {
+        null
+    }
+
+    /**
+     * Aggiorna SOLO i file del programma (sia nella versione installata sia in quella portatile): scarica lo zip,
+     * lo estrae, chiude l'app, copia i file sopra quelli vecchi e riapre l'app. Modelli e impostazioni non vengono toccati.
+     */
     suspend fun downloadAndInstall(onExit: () -> Unit) {
         val i = info ?: return
         if (status == UpdateStatus.DOWNLOADING) return
-        val url = i.msiUrl ?: i.zipUrl ?: return
-        val expected = if (i.msiUrl != null) i.msiSize else i.zipSize
-        val isMsi = i.msiUrl != null
+        val url = i.zipUrl ?: run { error = "Questa versione non ha il pacchetto di aggiornamento: scaricala dalla pagina delle versioni."; status = UpdateStatus.ERROR; return }
+        val root = appRoot()
+        if (root == null) {
+            error = "L'aggiornamento automatico funziona solo dall'app installata o portatile (non dall'ambiente di sviluppo)."
+            status = UpdateStatus.ERROR
+            return
+        }
         status = UpdateStatus.DOWNLOADING
         progress = 0f
         error = null
@@ -136,15 +152,16 @@ object Updater {
         withContext(Dispatchers.IO) {
             try {
                 val dir = File(appDataDir, "updates").also { it.mkdirs() }
-                val target = File(dir, url.substringAfterLast('/'))
-                AppLog.i("Download dell'aggiornamento 1.${i.build}: ${target.name}")
+                val zip = File(dir, url.substringAfterLast('/'))
+                AppLog.i("Download dell'aggiornamento 1.${i.build}: ${zip.name}")
                 val req = HttpRequest.newBuilder(URI.create(url))
                     .header("User-Agent", "MagicTouchRemove/$APP_VERSION").GET().build()
                 val resp = client().send(req, HttpResponse.BodyHandlers.ofInputStream())
                 if (resp.statusCode() !in 200..299) error("download: GitHub ha risposto ${resp.statusCode()}")
+                val expected = i.zipSize
                 val total = (if (expected > 0) expected else resp.headers().firstValueAsLong("Content-Length").orElse(0L)).toDouble()
                 var done = 0L
-                val part = File(target.path + ".part")
+                val part = File(zip.path + ".part")
                 resp.body().use { input ->
                     part.outputStream().use { out ->
                         val buf = ByteArray(256 * 1024)
@@ -153,7 +170,7 @@ object Updater {
                             if (n < 0) break
                             out.write(buf, 0, n)
                             done += n
-                            if (total > 0) progress = (done / total).toFloat().coerceAtMost(1f)
+                            if (total > 0) progress = (done / total).toFloat().coerceAtMost(1f) * 0.8f
                         }
                     }
                 }
@@ -161,29 +178,72 @@ object Updater {
                     part.delete()
                     error("file scaricato incompleto (${part.length()} di $expected byte)")
                 }
-                target.delete()
-                if (!part.renameTo(target)) error("impossibile salvare ${target.name}")
-                AppLog.i("Aggiornamento scaricato: ${target.path}")
-                if (isMsi) {
-                    message = "Avvio dell'installazione…"
-                    ProcessBuilder("msiexec", "/i", target.absolutePath).start()
-                    AppLog.i("Avviato l'installer: ${target.name}")
-                    launched = true
-                } else {
-                    message = "Scaricato in ${target.parent}. Estrai lo zip e sostituisci la cartella dell'app."
-                    try { Desktop.getDesktop().open(dir) } catch (_: Throwable) { }
+                zip.delete()
+                if (!part.renameTo(zip)) error("impossibile salvare ${zip.name}")
+
+                // estrazione in una cartella temporanea
+                message = "Preparazione dei file…"
+                val ex = File(dir, "extract")
+                ex.deleteRecursively(); ex.mkdirs()
+                var entries = 0
+                java.util.zip.ZipInputStream(zip.inputStream().buffered()).use { zin ->
+                    while (true) {
+                        val e = zin.nextEntry ?: break
+                        val out = File(ex, e.name)
+                        if (!out.canonicalPath.startsWith(ex.canonicalPath)) error("archivio non valido")
+                        if (e.isDirectory) out.mkdirs() else {
+                            out.parentFile.mkdirs()
+                            out.outputStream().use { zin.copyTo(it) }
+                            entries++
+                            if (entries % 50 == 0) progress = (0.8f + 0.2f * (entries % 1000) / 1000f)
+                        }
+                    }
                 }
+                val src = File(ex, "MagicTouchRemove")
+                val exe = File(src, "MagicTouchRemove.exe")
+                if (!exe.isFile) error("l'archivio scaricato non contiene il programma")
+                val log = File(dir, "update.log")
+                val script = File(dir, "apply-update.cmd")
+                val target = File(root, "MagicTouchRemove.exe")
+                script.writeText(
+                    "@echo off\r\n" +
+                        "chcp 65001 >nul\r\n" +
+                        "timeout /t 3 /nobreak >nul\r\n" +
+                        "robocopy \"${src.absolutePath}\" \"${root.absolutePath}\" /E /R:40 /W:2 /NFL /NDL /NJH /NJS /NP >nul\r\n" +
+                        "echo Copia file terminata con codice %errorlevel% > \"${log.absolutePath}\"\r\n" +
+                        "if %errorlevel% LSS 8 (\r\n" +
+                        "  rmdir /s /q \"${ex.absolutePath}\"\r\n" +
+                        "  del \"${zip.absolutePath}\"\r\n" +
+                        ")\r\n" +
+                        "start \"\" \"${target.absolutePath}\"\r\n",
+                    Charsets.UTF_8
+                )
+                AppLog.i("Aggiornamento pronto: copia dei file in ${root.path} e riavvio")
+                ProcessBuilder("cmd", "/c", "start", "\"\"", "/min", script.absolutePath).start()
+                launched = true
+                message = "L'app si riavvia per completare l'aggiornamento…"
                 status = UpdateStatus.READY
             } catch (e: Throwable) {
-                AppLog.e("Installazione dell'aggiornamento non riuscita", e)
+                AppLog.e("Aggiornamento non riuscito", e)
                 error = e.message ?: e.toString()
                 status = UpdateStatus.ERROR
             }
         }
         if (launched) {
-            kotlinx.coroutines.delay(1200)
+            kotlinx.coroutines.delay(800)
             onExit()
         }
+    }
+
+    /** Se un aggiornamento precedente ha lasciato un resoconto, lo trascrive nel registro. */
+    fun reportLastUpdate() {
+        try {
+            val f = File(File(appDataDir, "updates"), "update.log")
+            if (f.isFile) {
+                AppLog.i("Aggiornamento precedente: " + f.readText().trim())
+                f.delete()
+            }
+        } catch (_: Throwable) { }
     }
 
     fun openReleasesPage() {
