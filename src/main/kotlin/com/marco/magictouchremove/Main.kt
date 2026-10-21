@@ -81,7 +81,7 @@ fun main() = application {
 
     val winState = rememberWindowState(size = DpSize(1360.dp, 860.dp), position = WindowPosition(Alignment.Center))
 
-    val title = if (st.image != null) "${st.fileName} — Magic Touch Remove" else "Magic Touch Remove"
+    val title = if (st.image != null) "${st.fileName} — Magic Touch Remove $APP_VERSION" else "Magic Touch Remove $APP_VERSION"
 
     Window(
         onCloseRequest = ::exitApplication,
