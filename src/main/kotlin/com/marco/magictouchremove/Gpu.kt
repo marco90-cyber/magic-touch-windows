@@ -31,6 +31,7 @@ object Gpu {
         get() = Prefs.get("gpuDevice", "-1").toIntOrNull() ?: -1
         set(v) {
             Prefs.set("gpuDevice", v.toString())
+            bad.clear(); Prefs.set("gpuBad", "")
             failed = false
             Engines.releaseAll()
         }
@@ -104,6 +105,7 @@ object Gpu {
         get() = Prefs.get("useGpu", "1") == "1"
         set(v) {
             Prefs.set("useGpu", if (v) "1" else "0")
+            bad.clear(); Prefs.set("gpuBad", "")
             failed = false
             Engines.releaseAll()   // i modelli si ricaricano con la nuova impostazione
         }
@@ -140,7 +142,18 @@ object Gpu {
         return o
     }
 
+    // modelli per cui la GPU ha dato errore (si ricordano anche al prossimo avvio)
+    private val bad: MutableSet<String> = Prefs.get("gpuBad", "").split(',').filter { it.isNotBlank() }.toMutableSet()
+    private val recent = mutableListOf<String>()   // modelli caricati sulla GPU nello stesso gruppo (pochi secondi)
+    private var recentAt = 0L
+
     fun session(env: OrtEnvironment, path: String): OrtSession {
+        val name = File(path).name
+        if (name in bad) {
+            AppLog.i("«$name» usa la CPU (la GPU aveva dato errore con questo modello)")
+            active = false
+            return env.createSession(path, baseOptions())
+        }
         if (enabled && available && !failed) {
             try {
                 val o = baseOptions()
@@ -150,6 +163,10 @@ object Gpu {
                 appendDirectML(o, dev)
                 val s = env.createSession(path, o)
                 active = true
+                val now = System.currentTimeMillis()
+                if (now - recentAt > 3000) recent.clear()
+                recentAt = now
+                recent.add(name)
                 AppLog.i("«${File(path).name}» caricato sulla GPU #$dev (${adapters.firstOrNull { it.index == dev }?.name ?: "?"}) con DirectML")
                 return s
             } catch (e: Throwable) {
@@ -161,12 +178,15 @@ object Gpu {
         return env.createSession(path, baseOptions())
     }
 
-    /** Un calcolo sulla GPU è fallito: da ora e fino al riavvio si usa la CPU. */
-    fun fallbackToCpu() {
+    /** Un calcolo sulla GPU è fallito: quel modello passa alla CPU (anche ai prossimi avvii), gli altri restano sulla GPU. */
+    fun fallbackToCpu(cause: Throwable? = null) {
         if (!active) return
-        AppLog.w("Errore durante il calcolo sulla GPU: passo alla CPU")
-        failed = true
+        AppLog.w("Errore durante il calcolo sulla GPU (${cause?.javaClass?.simpleName}: ${cause?.message}): questo modello passa alla CPU")
+        bad.addAll(recent)
+        recent.clear()
+        Prefs.set("gpuBad", bad.joinToString(","))
         active = false
-        Engines.releaseAll()
+        // le sessioni DirectML in errore NON si chiudono: farlo manda in crash ONNX Runtime
+        Engines.dropAll()
     }
 }

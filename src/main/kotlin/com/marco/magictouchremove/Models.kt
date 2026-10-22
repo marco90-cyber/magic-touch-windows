@@ -303,6 +303,16 @@ object Engines {
         bgRemover?.close(); bgRemover = null; bgRemoverId = null
     }
 
+    /** Scarta i motori senza chiuderli (dopo un errore della GPU la chiusura farebbe andare in crash l'app). */
+    @Synchronized
+    fun dropAll() {
+        inpainter = null; inpainterId = null
+        segmenter = null; segmenterId = null
+        generator = null
+        upscaler = null; upscalerId = null
+        bgRemover = null; bgRemoverId = null
+    }
+
     private var generator: SdInpainter? = null
     private var upscaler: Upscaler? = null
     private var upscalerId: String? = null

@@ -440,7 +440,7 @@ class EditorState(private val scope: CoroutineScope) {
             val t0 = System.currentTimeMillis()
             var r = runCatching { Engines.segmenter().select(img, point, box) }
             if (r.isFailure && Gpu.active && r.exceptionOrNull() !is OutOfMemoryError) {
-                Gpu.fallbackToCpu()
+                Gpu.fallbackToCpu(r.exceptionOrNull())
                 r = runCatching { Engines.segmenter().select(img, point, box) }
             }
             r.exceptionOrNull()?.let { AppLog.e("Selezione automatica non riuscita", it) }
@@ -483,7 +483,7 @@ class EditorState(private val scope: CoroutineScope) {
             val t0 = System.currentTimeMillis()
             var r = runCatching { Engines.inpainter().inpaint(img, m, ex, feather) }
             if (r.isFailure && Gpu.active && r.exceptionOrNull() !is OutOfMemoryError) {
-                Gpu.fallbackToCpu()
+                Gpu.fallbackToCpu(r.exceptionOrNull())
                 r = runCatching { Engines.inpainter().inpaint(img, m, ex, feather) }
             }
             r.exceptionOrNull()?.let {
@@ -553,7 +553,7 @@ class EditorState(private val scope: CoroutineScope) {
             val cancelled = { gen != jobGen }
             var r = runCatching { job(img, cancelled) }
             if (r.isFailure && !cancelled() && Gpu.active && r.exceptionOrNull() !is OutOfMemoryError) {
-                Gpu.fallbackToCpu()
+                Gpu.fallbackToCpu(r.exceptionOrNull())
                 r = runCatching { job(img, cancelled) }
             }
             if (!cancelled()) r.exceptionOrNull()?.let {
