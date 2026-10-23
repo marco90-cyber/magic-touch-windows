@@ -150,3 +150,18 @@ class BackgroundRemover(path: String, private val size: Int) {
 
     fun close() { runCatching { session.close() } }
 }
+
+
+/** Migliora i dettagli della parte ricostruita con Real-ESRGAN (se il modello è scaricato). */
+object DetailBoost {
+    var enabled: Boolean
+        get() = Prefs.get("detailBoost", "1") == "1"
+        set(v) = Prefs.set("detailBoost", if (v) "1" else "0")
+
+    val available: Boolean get() = ModelManager.activeOption(Kind.UPSCALE) != null
+
+    fun provider(isCancelled: () -> Boolean = { false }): ((BufferedImage) -> BufferedImage?)? {
+        if (!enabled || !available) return null
+        return { img -> Engines.upscaler().upscale(img, isCancelled) { } }
+    }
+}

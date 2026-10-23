@@ -581,6 +581,24 @@ private fun ModelsPanel() {
         ModelGroup("IA generativa (riempi con testo)", Kind.GENERATE, scope)
         ModelGroup("Ingrandimento foto", Kind.UPSCALE, scope)
         ModelGroup("Rimozione sfondo", Kind.BGREMOVE, scope)
+        var boostOn by remember { mutableStateOf(DetailBoost.enabled) }
+        Row(
+            Modifier.clip(RoundedCornerShape(3.dp)).clickable { boostOn = !boostOn; DetailBoost.enabled = boostOn }.padding(vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                Modifier.size(14.dp).clip(RoundedCornerShape(2.dp))
+                    .background(if (boostOn) PsAccent else Color(0xFF1F1F1F)).border(1.dp, PsBorder),
+                contentAlignment = Alignment.Center
+            ) { if (boostOn) Icon(Icons.Filled.Check, null, tint = Color.White, modifier = Modifier.size(11.dp)) }
+            Spacer(Modifier.width(6.dp))
+            Text("Migliora i dettagli della ricostruzione", color = PsText, fontSize = 12.sp)
+        }
+        Text(
+            if (DetailBoost.available) "Usa il modello di ingrandimento (Real-ESRGAN): risultato più nitido, un po' più lento"
+            else "Scarica un modello «Ingrandimento foto» qui sopra per attivarlo",
+            color = PsDim, fontSize = 11.sp
+        )
         var gpuOn by remember { mutableStateOf(Gpu.enabled) }
         Row(
             Modifier.clip(RoundedCornerShape(3.dp)).clickable { gpuOn = !gpuOn; Gpu.enabled = gpuOn }.padding(vertical = 2.dp),

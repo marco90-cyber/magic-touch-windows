@@ -481,10 +481,10 @@ class EditorState(private val scope: CoroutineScope) {
         val feather = ((1f - hardness) * 8f).toInt()
         scope.launch(Dispatchers.Default) {
             val t0 = System.currentTimeMillis()
-            var r = runCatching { Engines.inpainter().inpaint(img, m, ex, feather) }
+            var r = runCatching { Engines.inpainter().inpaint(img, m, ex, feather, DetailBoost.provider()) }
             if (r.isFailure && Gpu.active && r.exceptionOrNull() !is OutOfMemoryError) {
                 Gpu.fallbackToCpu(r.exceptionOrNull())
-                r = runCatching { Engines.inpainter().inpaint(img, m, ex, feather) }
+                r = runCatching { Engines.inpainter().inpaint(img, m, ex, feather, DetailBoost.provider()) }
             }
             r.exceptionOrNull()?.let {
                 AppLog.e("Rimozione non riuscita", it)
@@ -595,7 +595,7 @@ class EditorState(private val scope: CoroutineScope) {
             g.prompt = prompt; g.steps = steps; g.guidance = guidance
             g.onProgress = { progressText(it) }
             g.isCancelled = cancelled
-            g.inpaint(img, m, ex, feather)
+            g.inpaint(img, m, ex, feather, DetailBoost.provider(cancelled))
         }
     }
 

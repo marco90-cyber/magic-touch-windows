@@ -25,7 +25,10 @@ abstract class Inpainter {
     abstract fun close()
 
     /** @param mask w*h byte, >127 = pixel da rimuovere. Ritorna null se la maschera è vuota. */
-    fun inpaint(image: BufferedImage, mask: ByteArray, expand: Int, feather: Int): BufferedImage? {
+    fun inpaint(
+        image: BufferedImage, mask: ByteArray, expand: Int, feather: Int,
+        detailBoost: ((BufferedImage) -> BufferedImage?)? = null,
+    ): BufferedImage? {
         val w = image.width
         val h = image.height
 
@@ -81,7 +84,20 @@ abstract class Inpainter {
 
         // risultato e maschera morbida riportati alla risoluzione del ritaglio
         val outBmp512 = imageOf(n, n, outPx)
-        val outBmp = if (cw == n && ch == n) outBmp512 else scaled(outBmp512, cw, ch)
+        // facoltativo: Real-ESRGAN recupera dettagli sulla parte ricostruita (altrimenti resta morbida)
+        val boosted = try {
+            detailBoost?.invoke(outBmp512)
+        } catch (e: java.util.concurrent.CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            AppLog.w("Miglioramento dei dettagli non riuscito (${e.javaClass.simpleName}: ${e.message}): uso il risultato normale")
+            null
+        }
+        val outBmp = when {
+            boosted != null -> scaled(boosted, cw, ch)
+            cw == n && ch == n -> outBmp512
+            else -> scaled(outBmp512, cw, ch)
+        }
 
         val soft = softAlpha(m512, n, feather)
         val aPx = IntArray(plane) { ((soft[it] * 255f).toInt() shl 24) or 0xFFFFFF }
