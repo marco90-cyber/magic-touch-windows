@@ -2,6 +2,11 @@ package com.marco.magictouchremove
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Canvas
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.onPointerEvent
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.DragData
 import androidx.compose.ui.onExternalDrag
 import androidx.compose.foundation.Image
@@ -163,6 +168,10 @@ fun App(st: EditorState) {
         if (!st.showExport && !st.busy) st.pendingOpen = null
     }
 
+    var openMenu by remember { mutableStateOf<String?>(null) }
+    val menuX = remember { mutableStateMapOf<String, Int>() }
+
+    Box(Modifier.fillMaxSize()) {
     Column(
         Modifier.fillMaxSize().background(PsPanel)
             .onExternalDrag(
@@ -181,7 +190,7 @@ fun App(st: EditorState) {
                 }
             )
     ) {
-        MenuBar(st, onAbout = { showAbout = true })
+        MenuBar(st, openMenu, { openMenu = it }, menuX)
         OptionsBar(st)
         UpdateBanner(st)
         Row(Modifier.weight(1f).fillMaxWidth()) {
@@ -199,6 +208,8 @@ fun App(st: EditorState) {
         }
         StatusBar(st)
     }
+    openMenu?.let { m -> MenuOverlay(m, st, menuX, { showAbout = true }, { openMenu = null }) }
+    }
 
     if (showAbout) AboutDialog { showAbout = false }
     if (st.dropping) Box(
@@ -209,6 +220,7 @@ fun App(st: EditorState) {
     if (st.showLog) LogDialog(st)
     if (st.crashText != null) CrashDialog(st)
     if (st.showGenerate) GenerateDialog(st)
+    if (st.showTexture) TextureDialog(st)
     if (st.showExport) ExportDialog(st)
     if (st.showSysInfo) SysInfoDialog(st)
     if (Updater.dialogOpen) UpdateDialog(st)
@@ -218,76 +230,112 @@ fun App(st: EditorState) {
 // Barra dei menu
 // =========================================================================
 
+private val MENU_TITLES = listOf("File", "Modifica", "IA", "Visualizza", "Aggiornamenti", "Aiuto")
+private val MENU_BAR_HEIGHT = 28.dp
+
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
-private fun MenuBar(st: EditorState, onAbout: () -> Unit) {
-    val scope = rememberCoroutineScope()
+private fun MenuBar(
+    st: EditorState,
+    openMenu: String?,
+    setOpen: (String?) -> Unit,
+    positions: MutableMap<String, Int>,
+) {
     Row(
-        Modifier.fillMaxWidth().height(28.dp).background(PsPanelHeader),
+        Modifier.fillMaxWidth().height(MENU_BAR_HEIGHT).background(PsPanelHeader),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Image(
             painter = AppIcon, contentDescription = "Magic Touch Remove",
             modifier = Modifier.padding(horizontal = 8.dp).size(18.dp)
         )
-        Menu("File") { close ->
-            Item("Apri…", "Ctrl+O") { close(); st.openDialog() }
-            Item("Salva con nome…", "Ctrl+S", st.image != null) { close(); st.saveDialog() }
-            Item("Chiudi immagine", "Ctrl+W", st.image != null) { close(); st.close() }
-        }
-        Menu("Modifica") { close ->
-            Item("Annulla", "Ctrl+Z", st.canUndo) { close(); st.undo() }
-            Item("Ripeti", "Ctrl+Maiusc+Z", st.canRedo) { close(); st.redo() }
-            Item("Deseleziona", "Ctrl+D", st.hasMask) { close(); st.deselect() }
-            Item("Cancella con IA", "Invio", st.hasMask && !st.busy) { close(); st.remove() }
-        }
-        Menu("IA") { close ->
-            Item("Genera con descrizione…", "", st.hasMask && !st.busy) { close(); st.showGenerate = true }
-            Item("Ricostruisci la selezione (generativa)", "", st.hasMask && !st.busy) { close(); st.generate("", 20, 7.5f) }
-            Item("Ingrandisci la foto (Real-ESRGAN)", "", st.image != null && !st.busy) { close(); st.upscale() }
-            Item("Rimuovi sfondo", "", st.image != null && !st.busy) { close(); st.removeBackground() }
-        }
-        Menu("Visualizza") { close ->
-            Item("Adatta alla finestra", "Ctrl+0", st.image != null) { close(); st.fit() }
-            Item("Dimensione reale (100%)", "Ctrl+1", st.image != null) { close(); st.actualSize() }
-            Item("Ingrandisci", "Ctrl++", st.image != null) { close(); st.zoomAt(1.25f) }
-            Item("Riduci", "Ctrl+-", st.image != null) { close(); st.zoomAt(0.8f) }
-        }
-        Menu(if (Updater.status == UpdateStatus.AVAILABLE) "Aggiornamenti ●" else "Aggiornamenti") { close ->
-            Item("Controlla aggiornamenti…", "") { close(); scope.launch { Updater.check(true) } }
-            if (Updater.status == UpdateStatus.AVAILABLE) {
-                Item("Installa la versione ${Updater.info?.name ?: ""}…", "") { close(); Updater.dialogOpen = true }
-            }
-            Item((if (Updater.autoCheck) "✓  " else "     ") + "Controlla all'avvio", "") { close(); Updater.changeAutoCheck(!Updater.autoCheck) }
-            Item("Pagina delle versioni (GitHub)", "") { close(); Updater.openReleasesPage() }
-        }
-        Menu("Aiuto") { close ->
-            Item("Registro eventi…", "Ctrl+L") { close(); st.showLog = true }
-            Item("Informazioni sistema…", "") { close(); st.showSysInfo = true }
-            Item("Informazioni e licenze", "") { close(); onAbout() }
+        for (t in MENU_TITLES) {
+            val label = if (t == "Aggiornamenti" && Updater.status == UpdateStatus.AVAILABLE) "Aggiornamenti ●" else t
+            Text(
+                label,
+                color = PsText,
+                fontSize = 12.sp,
+                modifier = Modifier
+                    .onGloballyPositioned { positions[t] = it.positionInRoot().x.roundToInt() }
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(if (openMenu == t) PsHover else Color.Transparent)
+                    // con un menu aperto basta passare sopra un altro titolo per aprirlo
+                    .onPointerEvent(PointerEventType.Enter) { if (openMenu != null) setOpen(t) }
+                    .clickable { setOpen(if (openMenu == t) null else t) }
+                    .padding(horizontal = 10.dp, vertical = 5.dp)
+            )
         }
     }
 }
 
+/** Il menu aperto, disegnato sopra la finestra (non è un popup: così il passaggio da un menu all'altro è immediato). */
 @Composable
-private fun Menu(title: String, content: @Composable MenuScope.(close: () -> Unit) -> Unit) {
-    var open by remember { mutableStateOf(false) }
-    Box {
-        Text(
-            title,
-            color = PsText,
-            fontSize = 12.sp,
-            modifier = Modifier
-                .clip(RoundedCornerShape(3.dp))
-                .background(if (open) PsHover else Color.Transparent)
-                .clickable { open = true }
-                .padding(horizontal = 10.dp, vertical = 5.dp)
-        )
-        DropdownMenu(
-            expanded = open,
-            onDismissRequest = { open = false },
-            modifier = Modifier.background(PsPanel).widthIn(min = 240.dp)
-        ) {
-            MenuScope.content { open = false }
+private fun MenuOverlay(
+    title: String, st: EditorState, positions: Map<String, Int>,
+    onAbout: () -> Unit, close: () -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val topPx = with(density) { MENU_BAR_HEIGHT.roundToPx() }
+    Box(
+        Modifier.fillMaxSize().padding(top = MENU_BAR_HEIGHT).pointerInput(Unit) {
+            awaitEachGesture {
+                awaitFirstDown(requireUnconsumed = false).consume()
+                close()
+                waitForUpOrCancellation()
+            }
+        }
+    )
+    Column(
+        Modifier
+            .offset { IntOffset(positions[title] ?: 0, topPx) }
+            .width(280.dp)
+            .clip(RoundedCornerShape(4.dp))
+            .background(PsPanel)
+            .border(1.dp, PsBorder, RoundedCornerShape(4.dp))
+            .pointerInput(Unit) { detectTapGestures { } }
+            .padding(vertical = 4.dp)
+    ) {
+        with(MenuScope) {
+            when (title) {
+                "File" -> {
+                    Item("Apri…", "Ctrl+O") { close(); st.openDialog() }
+                    Item("Salva con nome…", "Ctrl+S", st.image != null) { close(); st.saveDialog() }
+                    Item("Chiudi immagine", "Ctrl+W", st.image != null) { close(); st.close() }
+                }
+                "Modifica" -> {
+                    Item("Annulla", "Ctrl+Z", st.canUndo) { close(); st.undo() }
+                    Item("Ripeti", "Ctrl+Maiusc+Z", st.canRedo) { close(); st.redo() }
+                    Item("Deseleziona", "Ctrl+D", st.hasMask) { close(); st.deselect() }
+                    Item("Cancella con IA", "Invio", st.hasMask && !st.busy) { close(); st.remove() }
+                }
+                "IA" -> {
+                    Item("Genera con descrizione…", "", st.hasMask && !st.busy) { close(); st.showGenerate = true }
+                    Item("Ricostruisci la selezione (generativa)", "", st.hasMask && !st.busy) { close(); st.generate("", 20, 7.5f) }
+                    Item("Ingrandisci la foto (Real-ESRGAN)", "", st.image != null && !st.busy) { close(); st.upscale() }
+                    Item("Rimuovi sfondo", "", st.image != null && !st.busy) { close(); st.removeBackground() }
+                    Item("Impostazioni ricostruzione…", "") { close(); st.showTexture = true }
+                }
+                "Visualizza" -> {
+                    Item("Adatta alla finestra", "Ctrl+0", st.image != null) { close(); st.fit() }
+                    Item("Dimensione reale (100%)", "Ctrl+1", st.image != null) { close(); st.actualSize() }
+                    Item("Ingrandisci", "Ctrl++", st.image != null) { close(); st.zoomAt(1.25f) }
+                    Item("Riduci", "Ctrl+-", st.image != null) { close(); st.zoomAt(0.8f) }
+                }
+                "Aggiornamenti" -> {
+                    Item("Controlla aggiornamenti…", "") { close(); scope.launch { Updater.check(true) } }
+                    if (Updater.status == UpdateStatus.AVAILABLE) {
+                        Item("Installa la versione ${Updater.info?.name ?: ""}…", "") { close(); Updater.dialogOpen = true }
+                    }
+                    Item((if (Updater.autoCheck) "✓  " else "     ") + "Controlla all'avvio", "") { close(); Updater.changeAutoCheck(!Updater.autoCheck) }
+                    Item("Pagina delle versioni (GitHub)", "") { close(); Updater.openReleasesPage() }
+                }
+                "Aiuto" -> {
+                    Item("Registro eventi…", "Ctrl+L") { close(); st.showLog = true }
+                    Item("Informazioni sistema…", "") { close(); st.showSysInfo = true }
+                    Item("Informazioni e licenze", "") { close(); onAbout() }
+                }
+            }
         }
     }
 }
@@ -928,6 +976,53 @@ private fun GenerateDialog(st: EditorState) {
                     st.showGenerate = false
                     st.generate(prompt, steps.toInt(), guidance)
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TextureDialog(st: EditorState) {
+    var grain by remember { mutableFloatStateOf(TextureMatch.grain) }
+    var sharp by remember { mutableFloatStateOf(TextureMatch.sharp) }
+    var boost by remember { mutableStateOf(DetailBoost.enabled) }
+    Dialog(onDismissRequest = { st.showTexture = false }) {
+        Column(
+            Modifier.width(520.dp).clip(RoundedCornerShape(6.dp)).background(PsPanel)
+                .border(1.dp, PsBorder, RoundedCornerShape(6.dp)).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text("Impostazioni ricostruzione", color = PsText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Text(
+                "Il riempimento dell'IA è più liscio del resto della foto. Queste regolazioni lo rendono più simile: " +
+                    "la grana si misura sulla tua foto e si aggiunge alla zona ricostruita.",
+                color = PsDim, fontSize = 12.sp
+            )
+            PsSlider("Grana", grain, 0f, 2f, "${(grain * 100).toInt()}%", { grain = (it * 20).roundToInt() / 20f; TextureMatch.grain = grain }, trackWidth = 260.dp)
+            PsSlider("Nitidezza", sharp, 0f, 1f, "${(sharp * 100).toInt()}%", { sharp = (it * 20).roundToInt() / 20f; TextureMatch.sharp = sharp }, trackWidth = 260.dp)
+            Row(
+                Modifier.clip(RoundedCornerShape(3.dp)).clickable { boost = !boost; DetailBoost.enabled = boost }.padding(vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    Modifier.size(14.dp).clip(RoundedCornerShape(2.dp))
+                        .background(if (boost) PsAccent else Color(0xFF1F1F1F)).border(1.dp, PsBorder),
+                    contentAlignment = Alignment.Center
+                ) { if (boost) Icon(Icons.Filled.Check, null, tint = Color.White, modifier = Modifier.size(11.dp)) }
+                Spacer(Modifier.width(6.dp))
+                Text("Migliora i dettagli con Real-ESRGAN", color = PsText, fontSize = 12.sp)
+            }
+            Text(
+                if (DetailBoost.available) "Richiede il modello «Ingrandimento foto» (già scaricato)."
+                else "Richiede un modello «Ingrandimento foto»: scaricalo dal pannello Modelli IA.",
+                color = PsDim, fontSize = 11.sp
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End), modifier = Modifier.fillMaxWidth()) {
+                PsButton("Ripristina") {
+                    grain = 1f; sharp = 0.4f; boost = true
+                    TextureMatch.grain = 1f; TextureMatch.sharp = 0.4f; DetailBoost.enabled = true
+                }
+                PsButton("Chiudi", primary = true) { st.showTexture = false }
             }
         }
     }

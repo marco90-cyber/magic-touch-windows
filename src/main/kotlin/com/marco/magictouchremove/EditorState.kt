@@ -520,6 +520,7 @@ class EditorState(private val scope: CoroutineScope) {
     // =====================================================================
 
     var transparent by mutableStateOf(false)   // l'immagine ha zone trasparenti (si disegna la scacchiera)
+    var showTexture by mutableStateOf(false)   // finestra «Impostazioni ricostruzione»
     var showGenerate by mutableStateOf(false)  // finestra «Genera con IA»
 
     @Volatile private var jobGen = 0
