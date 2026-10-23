@@ -107,6 +107,7 @@ abstract class Inpainter {
         val cp = crop.pixels()
         val op = outBmp.pixels()
         val ap = aBmp.pixels()
+        matchTexture(cp, op, ap, cw, ch, TextureMatch.grain, TextureMatch.sharp)
 
         for (i in cp.indices) {
             val a = (ap[i] ushr 24) / 255f
@@ -122,6 +123,79 @@ abstract class Inpainter {
         val result = image.copyImage()
         result.setRGB(left, top, cw, ch, cp, 0, cw)
         return result
+    }
+
+    private fun luma(p: Int): Float = 0.299f * ((p shr 16) and 255) + 0.587f * ((p shr 8) and 255) + 0.114f * (p and 255)
+
+    /** Stima robusta (mediana) della grana: deviazione standard del rumore ad alta frequenza. */
+    private fun grainSigma(px: IntArray, w: Int, h: Int, pick: (Int) -> Boolean): Float {
+        val hist = IntArray(1024)
+        var count = 0
+        var y = 1
+        while (y < h - 1) {
+            var x = 1
+            while (x < w - 1) {
+                val i = y * w + x
+                if (pick(i)) {
+                    val hp = luma(px[i]) - (luma(px[i - 1]) + luma(px[i + 1]) + luma(px[i - w]) + luma(px[i + w])) / 4f
+                    hist[min(1023, (kotlin.math.abs(hp) * 8f).toInt())]++
+                    count++
+                }
+                x += 2
+            }
+            y += 2
+        }
+        if (count < 50) return -1f
+        var acc = 0
+        for (b in 0 until 1024) {
+            acc += hist[b]
+            if (acc >= count / 2) return ((b + 0.5f) / 8f) / 0.6745f / 1.118f
+        }
+        return -1f
+    }
+
+    /**
+     * Il riempimento dell'IA è più liscio della foto: gli si aggiunge la stessa grana misurata attorno alla selezione
+     * e un po' di nitidezza, così non si nota la differenza.
+     */
+    private fun matchTexture(cp: IntArray, op: IntArray, ap: IntArray, w: Int, h: Int, grain: Float, sharp: Float) {
+        if (grain <= 0f && sharp <= 0f) return
+        // nitidezza (unsharp con sfocatura 3x3) solo dentro il riempimento
+        if (sharp > 0f) {
+            val src = op.copyOf()
+            for (y in 1 until h - 1) for (x in 1 until w - 1) {
+                val i = y * w + x
+                if ((ap[i] ushr 24) == 0) continue
+                var r = 0; var g = 0; var b = 0
+                for (dy in -1..1) for (dx in -1..1) {
+                    val p = src[i + dy * w + dx]
+                    r += (p shr 16) and 255; g += (p shr 8) and 255; b += p and 255
+                }
+                val c = src[i]
+                val nr = (((c shr 16) and 255) + sharp * (((c shr 16) and 255) - r / 9f)).toInt().coerceIn(0, 255)
+                val ng = (((c shr 8) and 255) + sharp * (((c shr 8) and 255) - g / 9f)).toInt().coerceIn(0, 255)
+                val nb = ((c and 255) + sharp * ((c and 255) - b / 9f)).toInt().coerceIn(0, 255)
+                op[i] = (255 shl 24) or (nr shl 16) or (ng shl 8) or nb
+            }
+        }
+        if (grain <= 0f) return
+        val target = grainSigma(cp, w, h) { (ap[it] ushr 24) == 0 }
+        val fill = grainSigma(op, w, h) { (ap[it] ushr 24) > 200 }
+        if (target < 0f || fill < 0f) return
+        val add = kotlin.math.sqrt(max(0f, target * target - fill * fill)) * grain
+        if (add < 0.3f) return
+        val rnd = java.util.Random(12345)
+        for (i in op.indices) {
+            val a = (ap[i] ushr 24) / 255f
+            if (a <= 0f) continue
+            val n = rnd.nextGaussian().toFloat() * add * a
+            val c = op[i]
+            val r = (((c shr 16) and 255) + n + rnd.nextGaussian().toFloat() * add * 0.25f * a).toInt().coerceIn(0, 255)
+            val g = (((c shr 8) and 255) + n + rnd.nextGaussian().toFloat() * add * 0.25f * a).toInt().coerceIn(0, 255)
+            val b = ((c and 255) + n + rnd.nextGaussian().toFloat() * add * 0.25f * a).toInt().coerceIn(0, 255)
+            op[i] = (255 shl 24) or (r shl 16) or (g shl 8) or b
+        }
+        AppLog.i("Grana abbinata: foto %.1f, riempimento %.1f, aggiunta %.1f".format(target, fill, add))
     }
 
     private fun anyMasked(mask: ByteArray, w: Int, left: Int, top: Int, x0: Int, x1: Int, y0: Int, y1: Int): Boolean {

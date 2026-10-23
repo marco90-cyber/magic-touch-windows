@@ -599,6 +599,11 @@ private fun ModelsPanel() {
             else "Scarica un modello «Ingrandimento foto» qui sopra per attivarlo",
             color = PsDim, fontSize = 11.sp
         )
+        var grainV by remember { mutableFloatStateOf(TextureMatch.grain) }
+        var sharpV by remember { mutableFloatStateOf(TextureMatch.sharp) }
+        PsSlider("Grana", grainV, 0f, 2f, "${(grainV * 100).toInt()}%", { grainV = (it * 20).roundToInt() / 20f; TextureMatch.grain = grainV }, trackWidth = 120.dp)
+        PsSlider("Nitidezza", sharpV, 0f, 1f, "${(sharpV * 100).toInt()}%", { sharpV = (it * 20).roundToInt() / 20f; TextureMatch.sharp = sharpV }, trackWidth = 120.dp)
+        Text("Grana e nitidezza si adattano alla foto, per togliere l'effetto liscio della ricostruzione", color = PsDim, fontSize = 11.sp)
         var gpuOn by remember { mutableStateOf(Gpu.enabled) }
         Row(
             Modifier.clip(RoundedCornerShape(3.dp)).clickable { gpuOn = !gpuOn; Gpu.enabled = gpuOn }.padding(vertical = 2.dp),

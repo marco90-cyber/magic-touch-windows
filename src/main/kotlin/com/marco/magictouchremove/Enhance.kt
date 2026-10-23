@@ -165,3 +165,17 @@ object DetailBoost {
         return { img -> Engines.upscaler().upscale(img, isCancelled) { } }
     }
 }
+
+
+/** Regolazioni che fanno somigliare il riempimento dell'IA al resto della foto. */
+object TextureMatch {
+    /** Moltiplicatore della grana abbinata (1 = quanta ne ha la foto). */
+    var grain: Float
+        get() = (Prefs.get("grain", "1.0").toFloatOrNull() ?: 1f).coerceIn(0f, 2f)
+        set(v) = Prefs.set("grain", v.toString())
+
+    /** Nitidezza aggiunta al riempimento (0..1). */
+    var sharp: Float
+        get() = (Prefs.get("sharp", "0.4").toFloatOrNull() ?: 0.4f).coerceIn(0f, 1f)
+        set(v) = Prefs.set("sharp", v.toString())
+}
