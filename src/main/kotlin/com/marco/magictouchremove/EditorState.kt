@@ -612,6 +612,8 @@ class EditorState(private val scope: CoroutineScope) {
     // anteprima della maschera per la tela (a risoluzione ridotta)
     // =====================================================================
 
+    private var overlayImg: BufferedImage? = null
+
     fun buildOverlay(): ImageBitmap? {
         val img = image ?: return null
         if (!hasMask) return null
@@ -620,15 +622,20 @@ class EditorState(private val scope: CoroutineScope) {
         val s = min(1f, 1600f / max(w, h))
         val ow = max(1, (w * s).toInt())
         val oh = max(1, (h * s).toInt())
-        val px = IntArray(ow * oh)
+        // si riusa lo stesso buffer a ogni aggiornamento (durante il tratto del pennello è chiamata di continuo)
+        val cache = overlayImg?.takeIf { it.width == ow && it.height == oh }
+            ?: BufferedImage(ow, oh, BufferedImage.TYPE_INT_ARGB).also { overlayImg = it }
+        val px = (cache.raster.dataBuffer as DataBufferInt).data
+        val xs = IntArray(ow) { min(w - 1, (it / s).toInt()) }
         for (y in 0 until oh) {
-            val sy = min(h - 1, (y / s).toInt())
+            val row = min(h - 1, (y / s).toInt()) * w
+            val o = y * ow
             for (x in 0 until ow) {
-                val a = mask[sy * w + min(w - 1, (x / s).toInt())].toInt() and 255
-                if (a != 0) px[y * ow + x] = (a shl 24) or 0xE5314B   // rosso
+                val a = mask[row + xs[x]].toInt() and 255
+                px[o + x] = if (a != 0) (a shl 24) or 0xE5314B else 0   // rosso
             }
         }
-        return imageOf(ow, oh, px).toComposeImageBitmap()
+        return cache.toComposeImageBitmap()
     }
 
     companion object {
