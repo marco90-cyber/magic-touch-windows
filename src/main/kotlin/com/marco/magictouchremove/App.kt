@@ -1077,9 +1077,7 @@ private fun ExportDialog(st: EditorState) {
     }
     var quality by remember { mutableIntStateOf((Prefs.get("exportQuality", "95").toIntOrNull() ?: 95).coerceIn(80, 100)) }
     var estimate by remember { mutableStateOf<String?>(null) }
-    var preview by remember { mutableStateOf<ImageBitmap?>(null) }       // dettaglio al 100%
-    var previewFit by remember { mutableStateOf<ImageBitmap?>(null) }    // immagine intera
-    var approx by remember { mutableStateOf(false) }
+    var preview by remember { mutableStateOf<ImageBitmap?>(null) }
     var fitPreview by remember { mutableStateOf(true) }
     val (w, h) = scaledSize(img, scale)
 
@@ -1087,35 +1085,14 @@ private fun ExportDialog(st: EditorState) {
     LaunchedEffect(format, scale, if (format.lossy) quality else 0, img) {
         estimate = null
         delay(300)
-        class Preview(val bytes: Long, val fit: java.awt.image.BufferedImage?, val detail: java.awt.image.BufferedImage?, val approx: Boolean)
         val result = withContext(Dispatchers.Default) {
             runCatching {
-                val opts = ExportOptions(format, quality, scale)
-                if (w.toLong() * h <= 4_000_000L) {
-                    // immagine piccola: si codifica tutta, il peso è esatto
-                    val bytes = encodeImage(img, opts)
-                    val dec = ImageIO.read(ByteArrayInputStream(bytes))
-                    Preview(bytes.size.toLong(), dec, dec, false)
-                } else {
-                    // immagine grande: anteprima su una versione ridotta e su un riquadro al 100%, peso stimato dal riquadro
-                    val k = minOf(1f, 1000f / maxOf(w, h))
-                    val small = scaled(img, maxOf(1, (w * k).roundToInt()), maxOf(1, (h * k).roundToInt()))
-                    val fit = ImageIO.read(ByteArrayInputStream(encodeImage(small, ExportOptions(format, quality, 1f))))
-                    val tw = minOf(w, 800)
-                    val th = minOf(h, 800)
-                    val sw = (tw / scale).roundToInt().coerceIn(1, img.width)
-                    val sh = (th / scale).roundToInt().coerceIn(1, img.height)
-                    val src = img.crop((img.width - sw) / 2, (img.height - sh) / 2, sw, sh)
-                    val tile = if (sw == tw && sh == th) src else scaled(src, tw, th)
-                    val tb = encodeImage(tile, ExportOptions(format, quality, 1f))
-                    Preview(tb.size.toLong() * (w.toLong() * h) / (tw.toLong() * th), fit, ImageIO.read(ByteArrayInputStream(tb)), true)
-                }
+                val bytes = encodeImage(img, ExportOptions(format, quality, scale))
+                bytes.size.toLong() to ImageIO.read(ByteArrayInputStream(bytes))
             }.getOrNull()
         }
-        approx = result?.approx ?: false
-        estimate = result?.let { formatBytes(it.bytes) } ?: "non disponibile"
-        preview = result?.detail?.toComposeImageBitmap()
-        previewFit = result?.fit?.toComposeImageBitmap()
+        estimate = result?.let { formatBytes(it.first) } ?: "non disponibile"
+        preview = result?.second?.toComposeImageBitmap()
     }
 
     Dialog(onDismissRequest = { st.showExport = false }) {
@@ -1156,7 +1133,7 @@ private fun ExportDialog(st: EditorState) {
                             Text("Non serve: ${format.label} non perde qualità.", color = PsDim, fontSize = 12.sp)
                         }
                     }
-                    Text("Peso stimato: " + (if (approx && estimate != null) "circa " else "") + (estimate ?: "calcolo in corso…"), color = PsText, fontSize = 12.sp)
+                    Text("Peso stimato: " + (estimate ?: "calcolo in corso…"), color = PsText, fontSize = 12.sp)
                 }
 
                 // ---- anteprima di come verrà salvata l'immagine
@@ -1168,7 +1145,7 @@ private fun ExportDialog(st: EditorState) {
                         PsButton("100%", primary = !fitPreview) { fitPreview = false }
                     }
                     Box(Modifier.fillMaxWidth().height(380.dp).background(PsCanvas).border(1.dp, PsBorder)) {
-                        val bmp = if (fitPreview) previewFit else preview
+                        val bmp = preview
                         if (bmp == null) {
                             Text("Preparazione dell'anteprima…", color = PsDim, fontSize = 12.sp, modifier = Modifier.align(Alignment.Center))
                         } else {
