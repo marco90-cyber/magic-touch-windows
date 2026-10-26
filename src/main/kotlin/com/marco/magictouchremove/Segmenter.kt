@@ -33,13 +33,13 @@ class MobileSamSegmenter(encoderPath: String, decoderPath: String) : Segmenter()
     private val decoder: OrtSession = Gpu.session(env, decoderPath)
     private val encoderInput: String = encoder.inputNames.first()
 
-    private var embeddedFor: BufferedImage? = null
+    private var embeddedFor: java.lang.ref.WeakReference<BufferedImage>? = null   // debole: non tiene in vita foto vecchie
     private var embedding: FloatArray? = null
 
     /** Analizza la foto (una volta sola per immagine). L'encoder vuole la foto con il lato lungo = 1024. */
     @Synchronized
     override fun ensureEncoded(img: BufferedImage) {
-        if (embeddedFor === img && embedding != null) return
+        if (embeddedFor?.get() === img && embedding != null) return
         val w = img.width
         val h = img.height
         val s = TARGET.toFloat() / max(w, h)
@@ -61,7 +61,7 @@ class MobileSamSegmenter(encoderPath: String, decoderPath: String) : Segmenter()
                 embedding = e
             }
         }
-        embeddedFor = img
+        embeddedFor = java.lang.ref.WeakReference(img)
     }
 
     /**
@@ -135,14 +135,14 @@ class Sam2Segmenter(encoderPath: String, decoderPath: String) : Segmenter() {
     private val env = OrtEnvironment.getEnvironment()
     private val encoder: OrtSession = Gpu.session(env, encoderPath)
     private val decoder: OrtSession = Gpu.session(env, decoderPath)
-    private var embeddedFor: BufferedImage? = null
+    private var embeddedFor: java.lang.ref.WeakReference<BufferedImage>? = null
     private var embed: FloatArray? = null
     private var feat0: FloatArray? = null
     private var feat1: FloatArray? = null
 
     @Synchronized
     override fun ensureEncoded(img: BufferedImage) {
-        if (embeddedFor === img && embed != null) return
+        if (embeddedFor?.get() === img && embed != null) return
         val px = scaled(img, TARGET, TARGET).pixels()
         val plane = TARGET * TARGET
         val arr = FloatArray(3 * plane)
@@ -165,7 +165,7 @@ class Sam2Segmenter(encoderPath: String, decoderPath: String) : Segmenter() {
                 embed = grab("image_embed")
             }
         }
-        embeddedFor = img
+        embeddedFor = java.lang.ref.WeakReference(img)
     }
 
     @Synchronized
