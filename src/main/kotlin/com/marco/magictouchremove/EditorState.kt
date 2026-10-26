@@ -202,12 +202,22 @@ class EditorState(private val scope: CoroutineScope) {
     private fun commit(label: String) {
         val img = image ?: return
         while (states.size > pos + 1) states.removeAt(states.size - 1)
-        states.add(HistoryState(img, mask.copyOf(), label))
+        // una selezione vuota non occupa memoria: si salva un segnaposto condiviso
+        states.add(HistoryState(img, if (mask.any { it.toInt() != 0 }) mask.copyOf() else EMPTY_MASK, label))
         pos = states.size - 1
         while (states.size > MAX_HISTORY) { states.removeAt(0); pos-- }
         // limite di memoria: la cronologia non può occupare più di ~35% dell'heap
         val budget = Runtime.getRuntime().maxMemory() * 25 / 100
-        fun used() = states.sumOf { it.image.width.toLong() * it.image.height * 4 + it.mask.size }
+        fun used(): Long {
+            // le immagini condivise tra più passi (es. solo selezioni) si contano una volta sola
+            val seen = java.util.IdentityHashMap<BufferedImage, Boolean>()
+            var total = 0L
+            for (s in states) {
+                if (seen.put(s.image, true) == null) total += s.image.width.toLong() * s.image.height * 4
+                total += s.mask.size
+            }
+            return total
+        }
         while (states.size > 2 && used() > budget) { states.removeAt(0); pos-- }
     }
 
@@ -215,7 +225,7 @@ class EditorState(private val scope: CoroutineScope) {
         if (busy || i < 0 || i >= states.size) return
         val s = states[i]
         image = s.image
-        mask = s.mask.copyOf()
+        mask = if (s.mask.isEmpty()) ByteArray(s.image.width * s.image.height) else s.mask.copyOf()
         pos = i
         hasMask = mask.any { it.toInt() != 0 }
         version++
@@ -395,20 +405,32 @@ class EditorState(private val scope: CoroutineScope) {
         if (pts.size < 3) return
         val w = img.width
         val h = img.height
-        val gray = BufferedImage(w, h, BufferedImage.TYPE_BYTE_GRAY)
+        // si disegna solo nel rettangolo che contiene il lasso (non su tutta l'immagine)
+        val bx0 = max(0, floor(pts.minOf { it.x }).toInt())
+        val by0 = max(0, floor(pts.minOf { it.y }).toInt())
+        val bx1 = min(w, kotlin.math.ceil(pts.maxOf { it.x }).toInt() + 1)
+        val by1 = min(h, kotlin.math.ceil(pts.maxOf { it.y }).toInt() + 1)
+        val bw = bx1 - bx0
+        val bh = by1 - by0
+        if (bw <= 0 || bh <= 0) return
+        val gray = BufferedImage(bw, bh, BufferedImage.TYPE_BYTE_GRAY)
         val g = gray.createGraphics()
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
         g.color = Color.WHITE
         val path = Path2D.Float()
-        path.moveTo(pts[0].x.toDouble(), pts[0].y.toDouble())
-        for (i in 1 until pts.size) path.lineTo(pts[i].x.toDouble(), pts[i].y.toDouble())
+        path.moveTo((pts[0].x - bx0).toDouble(), (pts[0].y - by0).toDouble())
+        for (i in 1 until pts.size) path.lineTo((pts[i].x - bx0).toDouble(), (pts[i].y - by0).toDouble())
         path.closePath()
         g.fill(path)
         g.dispose()
         val data = (gray.raster.dataBuffer as DataBufferByte).data
-        for (i in data.indices) {
-            val v = data[i].toInt() and 255
-            if (v > (mask[i].toInt() and 255)) mask[i] = v.toByte()
+        for (yy in 0 until bh) {
+            val src = yy * bw
+            val dst = (by0 + yy) * w + bx0
+            for (xx in 0 until bw) {
+                val v = data[src + xx].toInt() and 255
+                if (v > (mask[dst + xx].toInt() and 255)) mask[dst + xx] = v.toByte()
+            }
         }
         hasMask = mask.any { it.toInt() != 0 }
         version++
@@ -640,5 +662,6 @@ class EditorState(private val scope: CoroutineScope) {
 
     companion object {
         const val MAX_HISTORY = 30
+        val EMPTY_MASK = ByteArray(0)
     }
 }

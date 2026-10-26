@@ -20,6 +20,15 @@ fun imageOf(w: Int, h: Int, px: IntArray): BufferedImage {
 
 fun BufferedImage.copyImage(): BufferedImage {
     val out = BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB)
+    // copia diretta dei pixel (molto più veloce del disegno) quando il formato è già ARGB
+    if (type == BufferedImage.TYPE_INT_ARGB) {
+        val s = (raster.dataBuffer as? java.awt.image.DataBufferInt)?.data
+        val d = (out.raster.dataBuffer as java.awt.image.DataBufferInt).data
+        if (s != null && s.size == d.size) {
+            System.arraycopy(s, 0, d, 0, s.size)
+            return out
+        }
+    }
     val g = out.createGraphics()
     g.drawImage(this, 0, 0, null)
     g.dispose()
