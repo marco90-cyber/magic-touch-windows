@@ -30,7 +30,12 @@ class UpdateInfo(
     val size: Long get() = zipSize
 }
 
-enum class UpdateStatus { IDLE, CHECKING, UP_TO_DATE, AVAILABLE, DOWNLOADING, READY, ERROR }
+enum class UpdateStatus { IDLE, CHECKING, UP_TO_DATE, AVAILABLE, DOWNLOADING, PAUSED, READY, ERROR }
+
+/** Tiene acceso il PC (e lo schermo) durante il download: SetThreadExecutionState di Windows. */
+private interface Kernel32Power : com.sun.jna.Library {
+    fun SetThreadExecutionState(flags: Int): Int
+}
 
 /** Controllo e installazione degli aggiornamenti, leggendo l'ultima release pubblicata su GitHub. */
 object Updater {
@@ -58,7 +63,7 @@ object Updater {
         .build()
 
     suspend fun check(manual: Boolean) {
-        if (status == UpdateStatus.CHECKING || status == UpdateStatus.DOWNLOADING) return
+        if (status == UpdateStatus.CHECKING || status == UpdateStatus.DOWNLOADING || status == UpdateStatus.PAUSED) return
         status = UpdateStatus.CHECKING
         error = null
         if (manual) dialogOpen = true
@@ -135,9 +140,57 @@ object Updater {
      * Aggiorna SOLO i file del programma (sia nella versione installata sia in quella portatile): scarica lo zip,
      * lo estrae, chiude l'app, copia i file sopra quelli vecchi e riapre l'app. Modelli e impostazioni non vengono toccati.
      */
+    /** 0 = nessuna richiesta, 1 = pausa, 2 = annulla. */
+    @Volatile private var stopRequest = 0
+    @Volatile private var stream: java.io.InputStream? = null
+    /** Byte già scaricati (per la barra durante la pausa). */
+    var downloaded by mutableStateOf(0L); private set
+    var downloadTotal by mutableStateOf(0L); private set
+
+    private val power: Kernel32Power? by lazy {
+        try { com.sun.jna.Native.load("kernel32", Kernel32Power::class.java) } catch (_: Throwable) { null }
+    }
+
+    private fun keepAwake(on: Boolean) {
+        // ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED
+        try { power?.SetThreadExecutionState(if (on) (0x80000000L or 0x1L or 0x2L).toInt() else 0x80000000L.toInt()) } catch (_: Throwable) { }
+    }
+
+    private fun partFile(i: UpdateInfo): File? {
+        val url = i.zipUrl ?: return null
+        val dir = File(appDataDir, "updates").also { it.mkdirs() }
+        return File(dir, url.substringAfterLast('/') + ".part")
+    }
+
+    /** Ferma il download tenendo la parte già scaricata: «Riprendi» continua da lì. */
+    fun pause() {
+        if (status != UpdateStatus.DOWNLOADING) return
+        stopRequest = 1
+        try { stream?.close() } catch (_: Throwable) { }
+    }
+
+    /** Annulla il download ed elimina la parte già scaricata. */
+    fun cancel() {
+        when (status) {
+            UpdateStatus.DOWNLOADING -> {
+                stopRequest = 2
+                try { stream?.close() } catch (_: Throwable) { }
+            }
+            UpdateStatus.PAUSED, UpdateStatus.ERROR -> {
+                info?.let { partFile(it)?.delete() }
+                downloaded = 0
+                progress = 0f
+                error = null
+                status = if (info != null) UpdateStatus.AVAILABLE else UpdateStatus.IDLE
+            }
+            else -> {}
+        }
+    }
+
     suspend fun downloadAndInstall(onExit: () -> Unit) {
         val i = info ?: return
         if (status == UpdateStatus.DOWNLOADING) return
+        stopRequest = 0
         val url = i.zipUrl ?: run { error = "Questa versione non ha il pacchetto di aggiornamento: scaricala dalla pagina delle versioni."; status = UpdateStatus.ERROR; return }
         val root = appRoot()
         if (root == null) {
@@ -146,7 +199,9 @@ object Updater {
             return
         }
         status = UpdateStatus.DOWNLOADING
-        progress = 0f
+        downloaded = partFile(i)?.length() ?: 0L
+        downloadTotal = i.zipSize
+        progress = if (i.zipSize > 0) (downloaded.toFloat() / i.zipSize).coerceIn(0f, 1f) * 0.8f else 0f
         error = null
         var launched = false
         withContext(Dispatchers.IO) {
@@ -154,23 +209,52 @@ object Updater {
                 val dir = File(appDataDir, "updates").also { it.mkdirs() }
                 val zip = File(dir, url.substringAfterLast('/'))
                 AppLog.i("Download dell'aggiornamento 1.${i.build}: ${zip.name}")
-                val req = HttpRequest.newBuilder(URI.create(url))
-                    .header("User-Agent", "MagicTouchRemove/$APP_VERSION").GET().build()
-                val resp = client().send(req, HttpResponse.BodyHandlers.ofInputStream())
-                if (resp.statusCode() !in 200..299) error("download: GitHub ha risposto ${resp.statusCode()}")
-                val expected = i.zipSize
-                val total = (if (expected > 0) expected else resp.headers().firstValueAsLong("Content-Length").orElse(0L)).toDouble()
-                var done = 0L
                 val part = File(zip.path + ".part")
-                resp.body().use { input ->
-                    part.outputStream().use { out ->
-                        val buf = ByteArray(256 * 1024)
-                        while (true) {
-                            val n = input.read(buf)
-                            if (n < 0) break
-                            out.write(buf, 0, n)
-                            done += n
-                            if (total > 0) progress = (done / total).toFloat().coerceAtMost(1f) * 0.8f
+                val expected = i.zipSize
+                var done = part.length()
+                if (expected > 0 && done > expected) { part.delete(); done = 0 }
+                keepAwake(true)
+                if (expected <= 0 || done < expected) {
+                    // Ripresa: chiede solo la parte mancante (HTTP Range)
+                    val rb = HttpRequest.newBuilder(URI.create(url))
+                        .header("User-Agent", "MagicTouchRemove/$APP_VERSION")
+                    if (done > 0) rb.header("Range", "bytes=$done-")
+                    val resp = client().send(rb.GET().build(), HttpResponse.BodyHandlers.ofInputStream())
+                    val append = when (resp.statusCode()) {
+                        206 -> true
+                        in 200..299 -> { done = 0; false }
+                        else -> error("download: GitHub ha risposto ${resp.statusCode()}")
+                    }
+                    val total = (if (expected > 0) expected else resp.headers().firstValueAsLong("Content-Length").orElse(0L) + (if (append) done else 0L)).toDouble()
+                    downloadTotal = total.toLong()
+                    resp.body().use { input ->
+                        stream = input
+                        java.io.FileOutputStream(part, append).use { out ->
+                            val buf = ByteArray(256 * 1024)
+                            while (stopRequest == 0) {
+                                val n = try { input.read(buf) } catch (e: java.io.IOException) { if (stopRequest != 0) -1 else throw e }
+                                if (n < 0 || stopRequest != 0) break
+                                out.write(buf, 0, n)
+                                done += n
+                                downloaded = done
+                                if (total > 0) progress = (done / total).toFloat().coerceAtMost(1f) * 0.8f
+                            }
+                        }
+                    }
+                    stream = null
+                    when (stopRequest) {
+                        1 -> {
+                            AppLog.i("Download dell'aggiornamento in pausa ($done byte)")
+                            status = UpdateStatus.PAUSED
+                            return@withContext
+                        }
+                        2 -> {
+                            AppLog.i("Download dell'aggiornamento annullato")
+                            part.delete()
+                            downloaded = 0
+                            progress = 0f
+                            status = UpdateStatus.AVAILABLE
+                            return@withContext
                         }
                     }
                 }
@@ -224,9 +308,22 @@ object Updater {
                 message = "L'app si riavvia per completare l'aggiornamento…"
                 status = UpdateStatus.READY
             } catch (e: Throwable) {
-                AppLog.e("Aggiornamento non riuscito", e)
-                error = e.message ?: e.toString()
-                status = UpdateStatus.ERROR
+                stream = null
+                if (stopRequest == 1) {
+                    status = UpdateStatus.PAUSED
+                } else if (stopRequest == 2) {
+                    i.zipUrl?.let { File(File(appDataDir, "updates"), it.substringAfterLast('/') + ".part").delete() }
+                    downloaded = 0
+                    progress = 0f
+                    status = UpdateStatus.AVAILABLE
+                } else {
+                    AppLog.e("Aggiornamento non riuscito", e)
+                    // la parte scaricata resta: «Riprendi» continua da lì
+                    error = (e.message ?: e.toString()) + " — puoi riprendere il download."
+                    status = UpdateStatus.ERROR
+                }
+            } finally {
+                keepAwake(false)
             }
         }
         if (launched) {

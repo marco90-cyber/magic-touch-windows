@@ -327,6 +327,9 @@ private fun MenuOverlay(
                     if (Updater.status == UpdateStatus.AVAILABLE) {
                         Item("Installa la versione ${Updater.info?.name ?: ""}…", "") { close(); Updater.dialogOpen = true }
                     }
+                    if (Updater.status == UpdateStatus.PAUSED || Updater.status == UpdateStatus.DOWNLOADING) {
+                        Item("Download dell'aggiornamento…", "") { close(); Updater.dialogOpen = true }
+                    }
                     Item((if (Updater.autoCheck) "✓  " else "     ") + "Controlla all'avvio", "") { close(); Updater.changeAutoCheck(!Updater.autoCheck) }
                     Item("Pagina delle versioni (GitHub)", "") { close(); Updater.openReleasesPage() }
                 }
@@ -1258,6 +1261,12 @@ private fun UpdateBanner(st: EditorState) {
     }
 }
 
+private fun updBytes(): String {
+    val t = Updater.downloadTotal
+    val d = Updater.downloaded
+    return if (t > 0) String.format(java.util.Locale.ITALY, " (%.1f di %.1f MB)", d / 1048576.0, t / 1048576.0) else ""
+}
+
 @Composable
 private fun UpdateDialog(st: EditorState) {
     val scope = rememberCoroutineScope()
@@ -1298,11 +1307,20 @@ private fun UpdateDialog(st: EditorState) {
                         )
                     }
                     UpdateStatus.DOWNLOADING -> {
-                        Text("Download in corso… ${(Updater.progress * 100).toInt()}%", color = PsText, fontSize = 13.sp)
+                        Text("Download in corso… ${(Updater.progress * 100).toInt()}%" + updBytes(), color = PsText, fontSize = 13.sp)
                         LinearProgressIndicator(
                             progress = { Updater.progress }, modifier = Modifier.fillMaxWidth(),
                             color = PsAccent, trackColor = Color(0xFF1F1F1F)
                         )
+                        Text("Il PC e lo schermo restano accesi fino alla fine del download.", color = PsDim, fontSize = 11.sp)
+                    }
+                    UpdateStatus.PAUSED -> {
+                        Text("Download in pausa" + updBytes(), color = PsText, fontSize = 13.sp)
+                        LinearProgressIndicator(
+                            progress = { Updater.progress }, modifier = Modifier.fillMaxWidth(),
+                            color = PsAccent, trackColor = Color(0xFF1F1F1F)
+                        )
+                        Text("«Riprendi» continua da dove si è fermato.", color = PsDim, fontSize = 11.sp)
                     }
                     UpdateStatus.READY -> Text(Updater.message, color = PsText, fontSize = 13.sp)
                     UpdateStatus.ERROR -> {
@@ -1321,11 +1339,27 @@ private fun UpdateDialog(st: EditorState) {
                     PsButton("Scarica e installa", primary = true) {
                         scope.launch { Updater.downloadAndInstall { st.exitApp() } }
                     }
+                } else if (status == UpdateStatus.DOWNLOADING) {
+                    PsButton("Annulla") { Updater.cancel() }
+                    PsButton("Pausa", primary = true) { Updater.pause() }
+                } else if (status == UpdateStatus.PAUSED) {
+                    PsButton("Chiudi") { Updater.dialogOpen = false }
+                    PsButton("Annulla") { Updater.cancel() }
+                    PsButton("Riprendi", primary = true) {
+                        scope.launch { Updater.downloadAndInstall { st.exitApp() } }
+                    }
                 } else if (status == UpdateStatus.ERROR) {
                     PsButton("Pagina delle versioni") { Updater.openReleasesPage() }
-                    PsButton("Riprova", primary = true) { scope.launch { Updater.check(true) } }
+                    if (info != null && Updater.downloaded > 0) {
+                        PsButton("Annulla") { Updater.cancel() }
+                        PsButton("Riprendi", primary = true) {
+                            scope.launch { Updater.downloadAndInstall { st.exitApp() } }
+                        }
+                    } else {
+                        PsButton("Riprova", primary = true) { scope.launch { Updater.check(true) } }
+                    }
                     PsButton("Chiudi") { Updater.dialogOpen = false }
-                } else if (status != UpdateStatus.DOWNLOADING) {
+                } else {
                     PsButton("Chiudi", primary = status != UpdateStatus.CHECKING) { Updater.dialogOpen = false }
                 }
             }
